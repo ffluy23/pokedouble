@@ -9,6 +9,7 @@ import {
   checkConfusion, getStatusSpdPenalty,
   applyStatus, applyVolatile, tickVolatiles
 } from "../lib/effecthandler.js"
+import { checkTrickeryRedirect, trackProphecyData } from "../lib/bosses/delphox.js"
 import {
   startWeather, tickWeather, endWeather,
   applyWeatherDamage, getWeatherDamageMult,
@@ -17,6 +18,7 @@ import {
 import {
   deepCopyEntries, corsHeaders, rollD10
 } from "../lib/gameUtils.js"
+
 
 const PLAYER_SLOTS = ["p1", "p2", "p3"]
 const BEEDRILL_SLOTS = ["beedrill_0", "beedrill_1"]
@@ -577,6 +579,14 @@ async function finishTurn(roomRef, roomId, data, entries, logEntries, extraUpdat
     boss_seeded:     data.boss_seeded     ?? false,
     boss_seeder:     data.boss_seeder     ?? null,
     _phase2Entered:  data._phase2Entered  ?? false,
+    boss_reflectorTurns:     data.boss_reflectorTurns     ?? 0,
+    boss_trickery:           data.boss_trickery           ?? false,
+    boss_trickTurns:         data.boss_trickTurns         ?? 0,
+    boss_trickState:         data.boss_trickState         ?? null,
+    boss_prophecy:           data.boss_prophecy           ?? null,
+    boss_lastHitSlot:        data.boss_lastHitSlot        ?? null,
+    boss_prophecyLastMoves:  data.boss_prophecyLastMoves  ?? {},
+    _phase3Entered:          data._phase3Entered          ?? false,
     boss_last_attacker: data.boss_last_attacker ?? null,
     ...(data.boss_baby !== undefined ? { boss_baby: data.boss_baby } : {}),
   }
@@ -797,6 +807,8 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "지옥찌르기로 사용 불가" })
   if ((myPkmn.taunted ?? 0) > 0 && !(moves[moveData.name]?.power > 0))
     return res.status(403).json({ error: "도발로 사용 불가" })
+  if (myPkmn.sealedMove && myPkmn.sealedMoveTurns > 0 && moveData.name === myPkmn.sealedMove)
+    return res.status(403).json({ error: "봉인으로 사용 불가" })
 
   if (moves[moveData.name]?.lastResort) {
     const usedMoves  = myPkmn.usedMoves ?? []
@@ -1482,6 +1494,28 @@ export default async function handler(req, res) {
                 if (multiplier === 0) {
                   logEntries.push(makeLog("normal", `${bossName}에게는 효과가 없다…`))
                 } else {
+                  // ── 속임수: 낙인 대상이 보스 공격 시 아군이 대신 맞음 ──
+                  const trickery = checkTrickeryRedirect(mySlot, "boss", data, entries)
+                  if (trickery.redirected) {
+                    const friendlyIdx  = data[`${trickery.friendlySlot}_active_idx`] ?? 0
+                    const friendlyPkmn = entries[trickery.friendlySlot]?.[friendlyIdx]
+                    if (friendlyPkmn && friendlyPkmn.hp > 0) {
+                      const redirectDmg = Math.max(1, Math.floor(damage * 0.70))
+                      logEntries.push(makeLog("normal", `속임수! ${friendlyPkmn.name}${josa(friendlyPkmn.name, "이가")} 대신 맞았다! (${redirectDmg} 데미지)`))
+                      if (friendlyPkmn.enduring && redirectDmg >= friendlyPkmn.hp) {
+                        friendlyPkmn.hp = 1; friendlyPkmn.enduring = false
+                        logEntries.push(makeLog("after_hit", `${friendlyPkmn.name}${josa(friendlyPkmn.name, "은는")} 버텼다!`))
+                      } else {
+                        friendlyPkmn.hp = Math.max(0, friendlyPkmn.hp - redirectDmg)
+                      }
+                      logEntries.push(makeLog("hit", "", { defender: trickery.friendlySlot }))
+                      logEntries.push(makeLog("hp",  "", { slot: trickery.friendlySlot, hp: friendlyPkmn.hp, maxHp: friendlyPkmn.maxHp }))
+                      if (friendlyPkmn.hp <= 0) logEntries.push(makeLog("faint", `${friendlyPkmn.name}${josa(friendlyPkmn.name, "은는")} 쓰러졌다!`, { slot: trickery.friendlySlot }))
+                      // 보스는 피해 안 받음 → finishTurn으로 바로 이동
+                      const result = await finishTurn(roomRef, roomId, data, entries, logEntries)
+                      return res.status(200).json({ ok: true, ...(result ? { result } : {}) })
+                    }
+                  }
                   let finalDmg = damage
                   if (isAssistCaster) finalDmg = Math.floor(finalDmg * 1.15)
 
@@ -1500,6 +1534,8 @@ export default async function handler(req, res) {
                   data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - finalDmg)
                   // ── [추가] 누리레느 딜체크 누적 ──────────────
                   trackDealCheck(data, mySlot, finalDmg)
+                  // ── 마폭시 예언 추적 ──────────────────────────
+                  trackProphecyData(mySlot, moveData.name, !!(moveInfo?.power > 0), finalDmg, data)
 
                   // 더스트나 분노 체크
                   if (data.boss_state?.corruptionExploded && finalDmg > 0) {

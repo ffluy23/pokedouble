@@ -518,6 +518,10 @@ async function handleLogEntry(entry) {
     case "assist":  { await showAssistAnimation();  break }
     case "sync":    { await showSyncAnimation();    break }
     case "umbreon": { await showUmbreonAnimation(); break }
+    case "prophecy_text": {
+      if (entry.text) await showProphecyText(entry.text)
+      break
+    }
     case "revive": {
       if (meta?.slot) {
         const prefix = slotToPrefix(meta.slot)
@@ -743,9 +747,30 @@ function showUmbreonAnimation() {
       }
       doShake()
     }
+    
     el.classList.remove("umbreon-show"); void el.offsetWidth; el.classList.add("umbreon-show")
     setTimeout(resolve, 1400)
   })
+  // ── 마폭시 예언 / 대사 애니메이션 ────────────────────────────────────
+function showProphecyText(text) {
+  return new Promise(resolve => {
+    const el = $("prophecy-anim")
+    if (!el) { resolve(); return }
+
+    const isShort = text.length <= 40
+    const cls     = isShort ? "prophecy-show-short" : "prophecy-show"
+    const dur     = isShort ? 2800 : 4500
+
+    el.textContent = text
+    el.classList.remove("prophecy-show", "prophecy-show-short")
+    void el.offsetWidth
+    el.classList.add(cls)
+    setTimeout(() => {
+      el.classList.remove("prophecy-show", "prophecy-show-short")
+      resolve()
+    }, dur)
+  })
+}
 }
 
 // ── 기술 버튼 ────────────────────────────────────────────────────────
