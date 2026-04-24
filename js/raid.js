@@ -746,11 +746,11 @@ function showUmbreonAnimation() {
         }, { once: true })
       }
       doShake()
-    }
+    }                        // ← if(wrapper) 닫힘
   el.classList.remove("umbreon-show"); void el.offsetWidth; el.classList.add("umbreon-show")
     setTimeout(resolve, 1400)
-  })
-}                          // ← showUmbreonAnimation 여기서 닫힘
+  })                         // ← 여기 }) 추가!
+}
 
 // ── 마폭시 예언 / 대사 애니메이션 ──────────────────────────────────
 function showProphecyText(text) {
