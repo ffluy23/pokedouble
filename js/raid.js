@@ -801,15 +801,17 @@ function updateMoveButtons(data) {
     const moveInfo = moves[mv.name] ?? {}
     const acc      = moveInfo.alwaysHit ? "필중" : `${moveInfo.accuracy ?? 100}%`
 
-    const isChainBlocked = !!(chainBound && chainBound.moveName === mv.name)
-    if (isChainBlocked) {
-      const lockedBySeal = !!(myPokemon?.sealedMove && (myPokemon?.sealedMoveTurns ?? 0) > 0 && mv.name === myPokemon.sealedMove)
+   const isChainBlocked = !!(chainBound && chainBound.moveName === mv.name)
+    const lockedBySeal   = !!(myPokemon?.sealedMove && (myPokemon?.sealedMoveTurns ?? 0) > 0 && mv.name === myPokemon.sealedMove)
+
     if (lockedBySeal) {
       btn.innerHTML = `<span style="display:block;font-size:13px;font-weight:bold">${mv.name} 🔒</span><span style="display:block;font-size:10px;opacity:.85">봉인됨! (${myPokemon.sealedMoveTurns}턴)</span>`
       btn.style.background = "#7a6a8a"
       btn.style.boxShadow  = "none"
       btn.disabled = true; btn.onclick = null; continue
     }
+
+    if (isChainBlocked) {
       btn.innerHTML = `<span style="display:block;font-size:13px;font-weight:bold">${mv.name} 🔗</span><span style="display:block;font-size:10px;opacity:.85">사슬묶기 중!</span>`
       btn.style.background = "#555"; btn.disabled = true; btn.onclick = null; continue
     }
