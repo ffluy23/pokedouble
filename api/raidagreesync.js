@@ -47,8 +47,13 @@ export default async function handler(req, res) {
   const pkmn = data[`${s}_entry`]?.[idx]
   return pkmn && pkmn.hp > 0
 }).length
-  const activated   = newAgrees.length >= othersCount
-
+ const allOthers = PLAYER_SLOTS.filter(s => {
+  if (s === req_.from) return false
+  const idx  = data[`${s}_active_idx`] ?? 0
+  const pkmn = data[`${s}_entry`]?.[idx]
+  return pkmn && pkmn.hp > 0
+})
+const activated = allOthers.every(s => newAgrees.includes(s))
   if (activated) {
     // 싱크로 발동 — 보스 공격 1회 데미지 분산 대기
     await roomRef.update({

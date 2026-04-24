@@ -803,6 +803,13 @@ function updateMoveButtons(data) {
 
     const isChainBlocked = !!(chainBound && chainBound.moveName === mv.name)
     if (isChainBlocked) {
+      const lockedBySeal = !!(myPokemon?.sealedMove && (myPokemon?.sealedMoveTurns ?? 0) > 0 && mv.name === myPokemon.sealedMove)
+    if (lockedBySeal) {
+      btn.innerHTML = `<span style="display:block;font-size:13px;font-weight:bold">${mv.name} 🔒</span><span style="display:block;font-size:10px;opacity:.85">봉인됨! (${myPokemon.sealedMoveTurns}턴)</span>`
+      btn.style.background = "#7a6a8a"
+      btn.style.boxShadow  = "none"
+      btn.disabled = true; btn.onclick = null; continue
+    }
       btn.innerHTML = `<span style="display:block;font-size:13px;font-weight:bold">${mv.name} 🔗</span><span style="display:block;font-size:10px;opacity:.85">사슬묶기 중!</span>`
       btn.style.background = "#555"; btn.disabled = true; btn.onclick = null; continue
     }
@@ -825,8 +832,9 @@ function updateMoveButtons(data) {
     const lockedByOutrage    = !!(myPokemon?.outrageState?.active)
     const lockedByTaunt      = !!((myPokemon?.taunted ?? 0) > 0 && !(moveInfo?.power > 0))
 
-    const canUse = !isSpectator && !fainted && mv.pp > 0 && myTurn && !actionDone
+   const canUse = !isSpectator && !fainted && mv.pp > 0 && myTurn && !actionDone
       && !isChainBlocked && !lockedByTorment && !lockedByNoRepeat && !lockedByThroatChop && !lockedByOutrage && !lockedByTaunt
+      && !lockedBySeal
     btn.disabled = !canUse
     btn.onclick  = canUse ? () => { playSound(SFX_BTN); onMoveClick(i, moveInfo, data) } : null
   }

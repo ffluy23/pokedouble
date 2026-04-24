@@ -349,6 +349,10 @@ function attackBeedrill(myPkmn, mySlot, beeSlot, moveName, moveInfo, data, entri
     data.boss_lightScreen = 0
     logEntries.push(makeLog("normal", `보스${josa("보스", "의")} 빛의장막이 부서졌다!`))
   }
+ if (moveInfo?.breakBarrier && (data.boss_reflectorTurns ?? 0) > 0) {
+    data.boss_reflectorTurns = 0
+    logEntries.push(makeLog("normal", `${data.boss_name ?? "보스"}${josa(data.boss_name ?? "보스", "의")} 리플렉터가 부서졌다!`))
+  }
 
   const fakeDefForPower = { type: bee.type, speed: bee.speed ?? 3, ranks: bee.ranks ?? defaultRanks() }
   const powerOverride   = calcPowerOverride(moveInfo, myPkmn, fakeDefForPower)
@@ -1485,6 +1489,10 @@ export default async function handler(req, res) {
                   data.boss_lightScreen = 0
                   logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "의")} 빛의장막이 부서졌다!`))
                 }
+                if (moveInfo?.breakBarrier && (data.boss_reflectorTurns ?? 0) > 0) {
+  data.boss_reflectorTurns = 0
+  logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "의")} 리플렉터가 부서졌다!`))
+}
 
                 const powerOverride   = calcPowerOverride(moveInfo, myPkmn, fakeBoss)
                 const atkStatOverride = calcAtkStatOverride(moveInfo, myPkmn)
@@ -1666,6 +1674,14 @@ export default async function handler(req, res) {
     boss_seeder:        data.boss_seeder        ?? null,
     _phase2Entered:     data._phase2Entered     ?? false,
     boss_last_attacker: data.boss_last_attacker ?? null,
+    boss_reflectorTurns:     data.boss_reflectorTurns     ?? 0,
+    boss_trickery:           data.boss_trickery           ?? false,
+    boss_trickTurns:         data.boss_trickTurns         ?? 0,
+    boss_trickState:         data.boss_trickState         ?? null,
+    boss_prophecy:           data.boss_prophecy           ?? null,
+    boss_lastHitSlot:        data.boss_lastHitSlot        ?? null,
+    boss_prophecyLastMoves:  data.boss_prophecyLastMoves  ?? {},
+    _phase3Entered:          data._phase3Entered          ?? false,
     ...(data.boss_baby !== undefined ? { boss_baby: data.boss_baby } : {}),
   }
   PLAYER_SLOTS.forEach(s => {
