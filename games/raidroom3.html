@@ -386,6 +386,57 @@ body {
   100% { transform: translate(-50%,-50%) scale(2.0) rotate(-8deg); opacity: 0; }
 }
 
+/* ── 마폭시 예언 / 대사 ── */
+#prophecy-anim {
+  position: fixed;
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(680px, 92vw);
+  width: max-content;
+  padding: 12px 22px;
+  font-size: clamp(13px, 2.4vw, 18px);
+  font-style: italic;
+  font-weight: bold;
+  color: #fff;
+  text-align: center;
+  line-height: 1.55;
+  letter-spacing: 0.04em;
+  background: linear-gradient(135deg,
+    rgba(80, 0, 80, 0.82) 0%,
+    rgba(30, 0, 60, 0.88) 100%);
+  border: 1.5px solid rgba(180, 80, 255, 0.55);
+  border-radius: 14px;
+  box-shadow:
+    0 0 18px rgba(160, 60, 255, 0.5),
+    0 0 40px rgba(100, 0, 200, 0.25),
+    inset 0 0 12px rgba(200, 100, 255, 0.08);
+  text-shadow:
+    0 0 8px rgba(220, 150, 255, 0.9),
+    0 0 20px rgba(180, 80, 255, 0.6);
+  pointer-events: none;
+  z-index: 9998;
+  opacity: 0;
+  white-space: pre-line;
+}
+
+/* 예언 (긴 텍스트, 느리게) */
+.prophecy-show {
+  animation: prophecyFloat 4.5s ease forwards;
+}
+
+/* 보스 짧은 대사 (빠르게) */
+.prophecy-show-short {
+  animation: prophecyFloat 2.8s ease forwards;
+}
+
+@keyframes prophecyFloat {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(-18px); }
+  12%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  75%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+}
+
 /* ── 이펙트 ── */
 .defender-hit { animation: defenderHit 0.35s ease; }
 @keyframes defenderHit {
@@ -552,6 +603,8 @@ body {
 <div id="assist-anim">ASSIST!</div>
 <div id="sync-anim">SYNCHRONIZE!</div>
 <div id="umbreon-anim">OVERRIDE!</div>
+<!-- 마폭시 예언 / 대사 -->
+<div id="prophecy-anim"></div>
 
 <!-- ══ 인트로 오버레이 ══ -->
 <div id="intro-overlay">
@@ -775,7 +828,7 @@ body {
 </div><!-- /battle -->
 </div><!-- /battle-wrapper -->
 
-<script>const ROOM_ID = "raidroom3"</script>
+<script>const ROOM_ID = "raidroom1"</script>
 <script type="module" src="../js/raidchat.js"></script>
 <script type="module" src="../js/raidintro.js"></script>
 <script type="module" src="../js/raid.js"></script>
