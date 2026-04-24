@@ -747,11 +747,12 @@ function showUmbreonAnimation() {
       }
       doShake()
     }
-    
-    el.classList.remove("umbreon-show"); void el.offsetWidth; el.classList.add("umbreon-show")
+  el.classList.remove("umbreon-show"); void el.offsetWidth; el.classList.add("umbreon-show")
     setTimeout(resolve, 1400)
   })
-  // ── 마폭시 예언 / 대사 애니메이션 ────────────────────────────────────
+}                          // ← showUmbreonAnimation 여기서 닫힘
+
+// ── 마폭시 예언 / 대사 애니메이션 ──────────────────────────────────
 function showProphecyText(text) {
   return new Promise(resolve => {
     const el = $("prophecy-anim")
@@ -770,8 +771,7 @@ function showProphecyText(text) {
       resolve()
     }, dur)
   })
-}
-}
+}                         
 
 // ── 기술 버튼 ────────────────────────────────────────────────────────
 function updateMoveButtons(data) {
