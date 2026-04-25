@@ -98,6 +98,7 @@ export const moves = {
   "원념의칼":     { power: 50, type: "불", accuracy: 100, alwaysHit: false, effect: { drain: 0.2 } },
 "질투의불꽃": { power: 40, type: "불", accuracy: 100, alwaysHit: false,
                 effect: null, jealousFlame: true },
+  "블라스트번": { power: 70, type: "불", accuracy: 90, alwaysHit: false, hyperBeam: true },
 
   // ───── 물 ─────
   "거품광선":   { power: 40, type: "물", accuracy: 100, alwaysHit: false, effect: null },

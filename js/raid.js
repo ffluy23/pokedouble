@@ -872,6 +872,38 @@ function onMoveClick(idx, moveInfo, data) {
     return
   }
 
+  // ── 알낳기: 아군/자신 선택 팝업 ──
+  if (moveInfo?.eggHeal) {
+    const aliveAllies = otherPlayerSlots().filter(s => {
+      const aIdx = data[`${s}_active_idx`] ?? 0
+      const p    = data[`${s}_entry`]?.[aIdx]
+      return p && p.hp > 0
+    })
+    if (aliveAllies.length === 0) { doUseMove(idx, [], data); return }
+    const popup     = $("ally-target-popup")
+    const btnWrap   = $("ally-target-buttons")
+    const cancelBtn = $("ally-target-cancel")
+    if (!popup || !btnWrap) { doUseMove(idx, [], data); return }
+    btnWrap.innerHTML = ""
+    const selfBtn = document.createElement("button")
+    selfBtn.textContent = "나 자신"
+    selfBtn.style.cssText = "padding:3px 10px;border-radius:6px;border:1px solid #27ae60;background:#27ae60;color:#fff;cursor:pointer;font-size:11px;"
+    selfBtn.onclick = () => { popup.style.display = "none"; doUseMove(idx, [], data) }
+    btnWrap.appendChild(selfBtn)
+    aliveAllies.forEach(s => {
+      const aIdx = data[`${s}_active_idx`] ?? 0
+      const p    = data[`${s}_entry`]?.[aIdx]
+      const btn  = document.createElement("button")
+      btn.textContent = p?.name ?? s
+      btn.style.cssText = "padding:3px 10px;border-radius:6px;border:1px solid #27ae60;background:#27ae60;color:#fff;cursor:pointer;font-size:11px;"
+      btn.onclick = () => { popup.style.display = "none"; doUseMove(idx, [s], data) }
+      btnWrap.appendChild(btn)
+    })
+    cancelBtn.onclick = () => { popup.style.display = "none" }
+    popup.style.display = "block"
+    return
+  }
+
   // ── 꽃가루경단: 아군/적 선택 팝업 ──
   if (moveInfo?.pollenPuff) {
     const aliveAllies = otherPlayerSlots().filter(s => {

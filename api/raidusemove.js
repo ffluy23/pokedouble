@@ -544,6 +544,12 @@ function applyDamagesToPlayers(damages, entries, data, logEntries) {
     const idx  = data[`${slot}_active_idx`] ?? 0
     const pkmn = entries[slot]?.[idx]
     if (!pkmn || pkmn.hp <= 0) continue
+    if (pkmn.defending) {
+      logEntries.push(makeLog("normal", `${pkmn.name}${josa(pkmn.name, "은는")} 방어했다!`))
+      pkmn.defending = false
+      pkmn.defendTurns = 0
+      continue
+    }
     if (pkmn.enduring && dmg >= pkmn.hp) {
       pkmn.hp = 1; pkmn.enduring = false
       logEntries.push(makeLog("after_hit", `${pkmn.name}${josa(pkmn.name, "은는")} 버텼다!`))
@@ -1248,7 +1254,7 @@ export default async function handler(req, res) {
               if (types.includes("비행")) {
                 myPkmn._tempType = myPkmn.type
                 myPkmn.type = types.filter(t => t !== "비행")
-                myPkmn.roostTurns = 1
+                myPkmn.roostTurns = 2
                 logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "의")} 비행 타입이 사라졌다!`))
               }
             }
