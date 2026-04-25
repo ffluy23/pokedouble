@@ -1736,8 +1736,6 @@ myPkmn.roostTurns = 2
   }
   // ───────────────────────────────────────────────────────────────
 
-  const { assistEventTs, syncEventTs } = await writeLogs(roomId, logEntries)  // ← 이 줄 바로 위
-
   const { assistEventTs, syncEventTs } = await writeLogs(roomId, logEntries)
   if (assistEventTs !== null) update.assist_event = { ts: assistEventTs }
   if (syncEventTs   !== null) update.sync_event   = { ts: syncEventTs }
