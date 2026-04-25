@@ -1,4 +1,4 @@
-// moves.js (더블배틀)
+// moves.js 
 export const moves = {
   // ───── 랭크 전용 기술 ─────
   "칼춤":     { power: 0, type: "노말", accuracy: 100, alwaysHit: true, effect: null,

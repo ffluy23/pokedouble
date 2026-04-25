@@ -18,6 +18,7 @@ import {
 import {
   deepCopyEntries, corsHeaders, rollD10
 } from "../lib/gameUtils.js"
+import { recordMalamarMove } from "../lib/bosses/malamar.js"
 
 
 const PLAYER_SLOTS = ["p1", "p2", "p3"]
@@ -1728,11 +1729,21 @@ myPkmn.roostTurns = 2
     update[`${s}_total_damage`] = data[`${s}_total_damage`] ?? 0
   })
 
+  // ── [칼라마네로] 현혹 기록 ─────────────────────────────────────
+  if (data.boss_name === "칼라마네로") {
+    const malamarUpdate = recordMalamarMove(mySlot, moveData.name, data, entries)
+    if (malamarUpdate?.boss_state) data.boss_state = malamarUpdate.boss_state
+  }
+  // ───────────────────────────────────────────────────────────────
+
+  const { assistEventTs, syncEventTs } = await writeLogs(roomId, logEntries)  // ← 이 줄 바로 위
+
   const { assistEventTs, syncEventTs } = await writeLogs(roomId, logEntries)
   if (assistEventTs !== null) update.assist_event = { ts: assistEventTs }
   if (syncEventTs   !== null) update.sync_event   = { ts: syncEventTs }
 
   const earlyResult = checkRaidWin(entries, data.boss_current_hp ?? 0)
+
   if (earlyResult) {
     update.game_over = true; update.raid_result = earlyResult; update.current_order = []; update.turn_started_at = null
     await roomRef.update(update)
