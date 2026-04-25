@@ -1733,6 +1733,7 @@ myPkmn.roostTurns = 2
   if (data.boss_name === "칼라마네로") {
     const malamarUpdate = recordMalamarMove(mySlot, moveData.name, data, entries)
     if (malamarUpdate?.boss_state) data.boss_state = malamarUpdate.boss_state
+    update.boss_state = malamarUpdate.boss_state
   }
   // ───────────────────────────────────────────────────────────────
 
