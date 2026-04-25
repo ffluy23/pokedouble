@@ -351,6 +351,8 @@ rank: { targetAtk: -2, turns: 2 } },
                     outrage: { confusion: true, minTurn: 2, maxTurn: 3, powers: [60, 45, 30] } },
   "용성군":       { power: 60, type: "드래곤", accuracy: 90,  alwaysHit: false, effect: null,
                     rank: { def: -2, turns: 2 } },
+  "드래곤애로":     { power: 40, type: "드래곤", accuracy: 100,  alwaysHit: false, effect: null,
+                  multiHit: { min: 2, max: 2 } },
 
   // ───── 악 ─────
   "악의파동":     { power: 50, type: "악", accuracy: 100, alwaysHit: false,
