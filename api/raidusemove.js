@@ -624,6 +624,15 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
     const pkmn = entries[s]?.[idx]
     if (!pkmn || pkmn.hp <= 0) return
     tickRanks(pkmn, eotLogs)
+    pkmn.wideGuard = false
+    if ((pkmn.roostTurns ?? 0) > 0) {
+      pkmn.roostTurns--
+      if (!pkmn.roostTurns && pkmn._origType !== undefined && pkmn._origType !== null) {
+        pkmn.type = pkmn._origType
+        pkmn._origType = null
+        eotLogs.push(makeLog("normal", `${pkmn.name}${josa(pkmn.name, "의")} 비행 타입이 돌아왔다!`))
+      }
+    }
     if ((pkmn.tauntSelfTurns ?? 0) > 0) {
       pkmn.tauntSelfTurns--
       if (!pkmn.tauntSelfTurns) eotLogs.push(makeLog("normal", `${pkmn.name}에게 고정된 집중이 풀렸다!`))
@@ -673,13 +682,6 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
       eotLogs.push(makeLog("normal", `${pkmn.name}${josa(pkmn.name, "은는")} 저주 때문에 ${dmg} 데미지를 입었다!`))
       eotLogs.push(makeLog("hp", "", { slot: s, hp: pkmn.hp, maxHp: pkmn.maxHp }))
       if (pkmn.hp <= 0) eotLogs.push(makeLog("faint", `${pkmn.name}${josa(pkmn.name, "은는")} 쓰러졌다!`, { slot: s }))
-    }
-    if ((pkmn.roostTurns ?? 0) > 0) {
-      pkmn.roostTurns--
-      if (!pkmn.roostTurns && pkmn._tempType) {
-        pkmn.type = pkmn._tempType; pkmn._tempType = null
-        eotLogs.push(makeLog("normal", `${pkmn.name}${josa(pkmn.name, "의")} 비행타입이 돌아왔다!`))
-      }
     }
     pkmn.tookDamageLastTurn = false
     if (pkmn.status === "독" || pkmn.status === "화상") {
@@ -1043,6 +1045,15 @@ export default async function handler(req, res) {
           myPkmn.tauntSelfTurns = moveInfo.tauntSelf.turns ?? 2
           logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 적의 공격을 끌어당긴다! (${myPkmn.tauntSelfTurns}턴)`))
           specialHandled = true
+          } else if (moveInfo?.wideGuard) {
+          for (const s of PLAYER_SLOTS) {
+            const idx  = data[`${s}_active_idx`] ?? 0
+            const pkmn = entries[s]?.[idx]
+            if (!pkmn || pkmn.hp <= 0) continue
+            pkmn.wideGuard = true
+          }
+          logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 와이드가드로 팀을 지킨다!`))
+          specialHandled = true
         } else if (moveInfo?.defend) {
           if ((myPkmn.consecutiveDefend ?? 0) >= 2) {
             if (Math.random() * 100 >= 33) {
@@ -1222,6 +1233,27 @@ export default async function handler(req, res) {
             }
           }
           specialHandled = true
+          } else if (moveInfo?.counter) {
+  const lastDmg = myPkmn.last_damage_taken ?? 0
+  if (lastDmg <= 0) {
+    logEntries.push(makeLog("normal", "돌려줄 데미지가 없다!"))
+  } else {
+    const counterDmg = Math.max(1, Math.floor(lastDmg * 1.2))
+    if (anyBeedrillAlive(data)) {
+      ;(data.Beedrill ?? []).forEach((bee, i) => {
+        if (bee.hp <= 0) return
+        applyDamageToBeedrill(data, `beedrill_${i}`, counterDmg, logEntries)
+      })
+    } else {
+      data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - counterDmg)
+      logEntries.push(makeLog("hit", "", { defender: "boss" }))
+      logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+      logEntries.push(makeLog("after_hit", `${counterDmg} 데미지를 돌려줬다!`))
+      if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
+      trackDealCheck(data, mySlot, counterDmg)
+    }
+  }
+  specialHandled = true
         } else if (moveInfo?.splash) {
           logEntries.push(makeLog("normal", "그러나 아무 일도 일어나지 않았다!"))
           specialHandled = true
@@ -1252,9 +1284,9 @@ export default async function handler(req, res) {
             if (moveInfo?.effect?.removeFlying) {
               const types = Array.isArray(myPkmn.type) ? myPkmn.type : [myPkmn.type]
               if (types.includes("비행")) {
-                myPkmn._tempType = myPkmn.type
-                myPkmn.type = types.filter(t => t !== "비행")
-                myPkmn.roostTurns = 2
+               myPkmn._origType = myPkmn.type
+myPkmn.type = types.filter(t => t !== "비행")
+myPkmn.roostTurns = 2
                 logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "의")} 비행 타입이 사라졌다!`))
               }
             }

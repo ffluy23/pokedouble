@@ -240,7 +240,7 @@ rank: { targetAtk: -2, turns: 2 } },
   "구멍파기":   { power: 50, type: "땅", accuracy: 1,   alwaysHit: false, effect: null, dig: true },
 
   // ───── 바위 ─────
-  "스톤에지":   { power: 40, type: "바위", accuracy: 80,  alwaysHit: false, effect: null },
+  "스톤에지":   { power: 40, type: "바위", accuracy: 80,  alwaysHit: false, effect: null, highCrit: true },
   "돌떨구기":   { power: 40, type: "바위", accuracy: 90,  alwaysHit: false, effect: null },
   "바위깨기":   { power: 30, type: "바위", accuracy: 80,  alwaysHit: false, effect: null,
                   rank: { targetDef: -1, turns: 3 } },
@@ -320,7 +320,7 @@ rank: { targetAtk: -2, turns: 2 } },
   "섀도크루":   { power: 55, type: "고스트", accuracy: 100, alwaysHit: false, effect: null, highCrit: true },
   "나이트헤드": { power: 40, type: "고스트", accuracy: 100, alwaysHit: true,  effect: null },
   "섀도스니크": { power: 40, type: "고스트", accuracy: 100, alwaysHit: false, effect: null },
-  "이상한빛":   { power: 0,  type: "고스트", accuracy: 100, alwaysHit: false,
+  "이상한빛":   { power: 0,  type: "고스트", accuracy: 100, alwaysHit: false, targetSelf: false,
                   effect: { chance: 1, volatile: "혼란" } },
   "핥기":       { power: 30, type: "고스트", accuracy: 100, alwaysHit: false,
                   effect: { chance: 0.3, status: "마비" } },
@@ -374,6 +374,7 @@ rank: { targetAtk: -2, turns: 2 } },
   "도발":         { power: 0,  type: "악", accuracy: 100, alwaysHit: false, effect: null, taunt: true, targetSelf: false },
   "분풀이": { power: 45, type: "악", accuracy: 100, alwaysHit: false,
             effect: null, vengeance: true },
+  "깜짝베기":   { power: 40, type: "악", accuracy: 100,  alwaysHit: false, effect: null, highCrit: true },
 
 
   // ───── 강철 ─────
@@ -430,6 +431,7 @@ rank: { targetAtk: -2, turns: 2 } },
 
   // ───── 특수 기술 ─────
   "방어": { power: 0, type: "노말", accuracy: 100, alwaysHit: true, effect: null, defend: true, targetSelf: true, consecutiveCheck: true },
+  "킹실드": { power: 0, type: "강철", accuracy: 100, alwaysHit: true, effect: null, defend: true, targetSelf: true, consecutiveCheck: true },
 "판별": { power: 0, type: "격투", accuracy: 100, alwaysHit: true, effect: null, defend: true, targetSelf: true, consecutiveCheck: true },
   "울부짖기":   { power: 0,  type: "노말", accuracy: 100, alwaysHit: false, effect: null, roar: true, targetSelf: false },
   "원수갚기":   { power: 40, type: "노말", accuracy: 100, alwaysHit: false, effect: null, revenge: true },
@@ -481,4 +483,8 @@ rank: { targetAtk: -2, turns: 2 } },
                 effect: { heal: 0.22 }, targetSelf: true, eggHeal: true },
 "우유마시기":     { power: 0,  type: "노말", accuracy: 100, alwaysHit: true,
                 effect: { heal: 0.22 }, targetSelf: true, eggHeal: true },
+
+"와이드가드": { power: 0, type: "바위", accuracy: 100, alwaysHit: true,
+               wideGuard: true, targetSelf: true },
+
 }
