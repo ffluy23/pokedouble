@@ -1729,11 +1729,13 @@ myPkmn.roostTurns = 2
     update[`${s}_total_damage`] = data[`${s}_total_damage`] ?? 0
   })
 
-  // ── [칼라마네로] 현혹 기록 ─────────────────────────────────────
+// ── [칼라마네로] 현혹 기록 ─────────────────────────────────────
   if (data.boss_name === "칼라마네로") {
     const malamarUpdate = recordMalamarMove(mySlot, moveData.name, data, entries)
-    if (malamarUpdate?.boss_state) data.boss_state = malamarUpdate.boss_state
-    update.boss_state = malamarUpdate.boss_state
+    if (malamarUpdate?.boss_state) {
+      data.boss_state   = malamarUpdate.boss_state
+      update.boss_state = malamarUpdate.boss_state
+    }
   }
   // ───────────────────────────────────────────────────────────────
 
