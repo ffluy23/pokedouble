@@ -254,6 +254,9 @@ function calcPowerOverride(moveInfo, myPkmn, def = null) {
     else if (ratio <= 3) return 50
     else                 return 60
   }
+  if (moveInfo?.stomping_tantrum) {
+    return myPkmn._prevMissed ? 54 : 45
+  }
   if (moveInfo?.vengeance) {
     const r = myPkmn.ranks ?? {}
     const isDebuffed =
@@ -1023,6 +1026,8 @@ export default async function handler(req, res) {
     conf.msgs.forEach(m => logEntries.push(makeLog("normal", m)))
 
     if (!conf.selfHit) {
+       myPkmn._prevMissed    = myPkmn.lastMoveMissed ?? false
+      myPkmn.lastMoveMissed = false
       myPkmn.moves[moveIdx] = { ...moveData, pp: moveData.pp - 1 }
       myPkmn.lastUsedMove   = moveData.name
       if (moveInfo?.consecutiveCheck) {
@@ -1517,6 +1522,7 @@ myPkmn.roostTurns = 2
               const { hit, hitType }  = calcHit(myPkmn, effectiveMoveInfo, fakeBoss, data.weather ?? null)
               if (!hit) {
                 logEntries.push(makeLog("normal", hitType === "evaded" ? `${bossName}${josa(bossName, "이가")} 피했다!` : `${myPkmn.name}의 공격은 빗나갔다!`))
+                myPkmn.lastMoveMissed = true
                 if (moveInfo?.jumpKick) {
                   const selfDmg = Math.max(1, Math.floor((myPkmn.maxHp ?? myPkmn.hp) * 0.25))
                   myPkmn.hp = Math.max(0, myPkmn.hp - selfDmg)
@@ -1563,6 +1569,7 @@ myPkmn.roostTurns = 2
                       return res.status(200).json({ ok: true, ...(result ? { result } : {}) })
                     }
                   }
+                  myPkmn.lastMoveMissed = false
                   let finalDmg = damage
                   if (isAssistCaster) finalDmg = Math.floor(finalDmg * 1.15)
 
