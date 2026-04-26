@@ -179,7 +179,7 @@ function updateBossUI(data) {
   const displayName     = illusionActive && data.boss_state?.illusionName
                           ? data.boss_state.illusionName : bossName
   const displayPortrait = illusionActive && data.boss_state?.illusionPortrait
-                          ? data.boss_state.illusionPortrait : (data.boss_portrait_url ?? null)
+                          ? data.boss_state.illusionPortrait : (data.boss_portrait ?? null)
   // ─────────────────────────────────────────────────────────────
 
   const nameEl = $("boss-name")
