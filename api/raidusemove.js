@@ -909,7 +909,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, ...(result ? { result } : {}) })
   }
 
-  if (myPkmn.bideState) {
+ if (myPkmn.bideState) {
     myPkmn.bideState.turnsLeft--
     if (myPkmn.bideState.turnsLeft > 0) {
       logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 참고 있다...`))
@@ -927,15 +927,20 @@ export default async function handler(req, res) {
             applyDamageToBeedrill(data, `beedrill_${i}`, bideDmg, logEntries)
           })
         } else {
-          data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - bideDmg)
-          logEntries.push(makeLog("hit", "", { defender: "boss" }))
-          logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
-          logEntries.push(makeLog("after_hit", `${bideDmg} 데미지!`))
-          if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
-          trackDealCheck(data, mySlot, bideDmg)
+          if (data.boss_state?.isShedinja) {
+            logEntries.push(makeLog("normal", "공격이 스쳐 지나간다... 아무것도 닿지 않는다."))
+          } else {
+            data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - bideDmg)
+            logEntries.push(makeLog("hit", "", { defender: "boss" }))
+            logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+            logEntries.push(makeLog("after_hit", `${bideDmg} 데미지!`))
+            if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
+            trackDealCheck(data, mySlot, bideDmg)
+          }
         }
       }
     }
+   
     const result = await finishTurn(roomRef, roomId, data, entries, logEntries)
     return res.status(200).json({ ok: true, ...(result ? { result } : {}) })
   }
@@ -963,13 +968,18 @@ export default async function handler(req, res) {
         myPkmn.rollState = { active: false, turn: 0 }
       } else {
         const dmg = Math.floor(rollPower * mult)
-        data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - dmg)
-        logEntries.push(makeLog("hit", "", { defender: "boss" }))
-        logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
-        logEntries.push(makeLog("after_hit", `구르기 ${rollTurn}번째 (${dmg} 데미지)!`))
-        if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
-        trackDealCheck(data, mySlot, dmg)
-        myPkmn.rollState = rollTurn >= 3 || data.boss_current_hp <= 0 ? { active: false, turn: 0 } : { active: true, turn: rollTurn, targetSlot: "boss" }
+       if (data.boss_state?.isShedinja) {
+          logEntries.push(makeLog("normal", "공격이 스쳐 지나간다... 아무것도 닿지 않는다."))
+          myPkmn.rollState = rollTurn >= 3 ? { active: false, turn: 0 } : { active: true, turn: rollTurn, targetSlot: "boss" }
+        } else {
+          data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - dmg)
+          logEntries.push(makeLog("hit", "", { defender: "boss" }))
+          logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+          logEntries.push(makeLog("after_hit", `구르기 ${rollTurn}번째 (${dmg} 데미지)!`))
+          if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
+          trackDealCheck(data, mySlot, dmg)
+          myPkmn.rollState = rollTurn >= 3 || data.boss_current_hp <= 0 ? { active: false, turn: 0 } : { active: true, turn: rollTurn, targetSlot: "boss" }
+        }
       }
     }
     const result = await finishTurn(roomRef, roomId, data, entries, logEntries)
@@ -997,12 +1007,16 @@ export default async function handler(req, res) {
       if (multiplier === 0) {
         logEntries.push(makeLog("normal", `${bossName}에게는 효과가 없다…`))
       } else {
-        data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - damage)
-        logEntries.push(makeLog("hit", "", { defender: "boss" }))
-        logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
-        if (critical) logEntries.push(makeLog("after_hit", "급소에 맞았다!"))
-        if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
-        trackDealCheck(data, mySlot, damage)
+      if (data.boss_state?.isShedinja) {
+              logEntries.push(makeLog("normal", "공격이 스쳐지나간다... 아무것도 닿지 않는다."))
+            } else {
+              data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - damage)
+              logEntries.push(makeLog("hit", "", { defender: "boss" }))
+              logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+              if (critical) logEntries.push(makeLog("after_hit", "급소에 맞았다!"))
+              if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
+              trackDealCheck(data, mySlot, damage)
+            }
       }
     }
     if (isLastTurn) {
@@ -1511,12 +1525,16 @@ myPkmn.roostTurns = 2
                     applyDamageToBeedrill(data, `beedrill_${i}`, counterDmg, logEntries)
                   })
                 } else {
-                  data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - counterDmg)
-                  logEntries.push(makeLog("hit", "", { defender: "boss" }))
-                  logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
-                  logEntries.push(makeLog("after_hit", `${counterDmg} 데미지를 돌려줬다!`))
-                  if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
-                  trackDealCheck(data, mySlot, counterDmg)
+                 if (data.boss_state?.isShedinja) {
+                    logEntries.push(makeLog("normal", "공격이 스쳐지나간다... 아무것도 닿지 않는다."))
+                  } else {
+                    data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - counterDmg)
+                    logEntries.push(makeLog("hit", "", { defender: "boss" }))
+                    logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+                    logEntries.push(makeLog("after_hit", `${counterDmg} 데미지를 돌려줬다!`))
+                    if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
+                    trackDealCheck(data, mySlot, counterDmg)
+                  }
                 }
               }
             } else {
@@ -1587,10 +1605,14 @@ myPkmn.roostTurns = 2
 
                   finalDmg = applyDmgMultipliers(finalDmg, moveInfo, moveData.name, myPkmn, data.boss_status ?? null, data.boss_current_hp ?? 0, data.boss_max_hp ?? 1, logEntries)
                   finalDmg = Math.max(1, finalDmg)
-                  data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - finalDmg)
-                  // ── [추가] 누리레느 딜체크 누적 ──────────────
-                  //조로아크 딜체크 추척
-                  trackDealCheck(data, mySlot, finalDmg)
+                  if (data.boss_state?.isShedinja) {
+                    logEntries.push(makeLog("normal", "공격이 스쳐 지나간다... 아무것도 닿지 않는다."))
+                  } else {
+                    data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - finalDmg)
+                    // ── [추가] 누리레느 딜체크 누적 ──────────────
+                    //조로아크 딜체크 추적
+                    trackDealCheck(data, mySlot, finalDmg)
+                  }
                   recordZoroarkHit(mySlot, finalDmg, data)
                   // ── 마폭시 예언 추적 ──────────────────────────
                   trackProphecyData(mySlot, moveData.name, !!(moveInfo?.power > 0), finalDmg, data)

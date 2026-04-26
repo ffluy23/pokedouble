@@ -58,8 +58,6 @@ function resetOnSwitch(pkmn) {
   pkmn.hyperBeamState = false
 }
 
-
-// ── 보스 턴 연속 처리 ────────────────────────────────────────────────
 async function runBossIfNext(roomId) {
   const snap = await db.collection("raid").doc(roomId).get()
   const freshData = snap.data()
@@ -106,8 +104,6 @@ export default async function handler(req, res) {
   resetOnSwitch(prevPkmn)
   nextPkmn.seeded = false
 
-
-  // active_idx 먼저 반영 (장판 적용 대상 포켓몬 결정)
   data[`${mySlot}_active_idx`] = newIdx
 
   const logs = [
@@ -115,7 +111,7 @@ export default async function handler(req, res) {
     `${myName}${josa(myName, "은는")} ${next}${josa(next, "을를")} 내보냈다!`,
   ]
 
-// 치유소원 회복
+  // 치유소원 회복
   if (data[`${mySlot}_healWish`]) {
     const heal = Math.max(1, Math.floor((nextPkmn.maxHp ?? nextPkmn.hp) * 0.5))
     nextPkmn.hp = Math.min(nextPkmn.maxHp ?? nextPkmn.hp, nextPkmn.hp + heal)
@@ -127,20 +123,26 @@ export default async function handler(req, res) {
     data[`${mySlot}_healWish`] = false
   }
 
-  // ── 기절 교체 or 유턴 강제교체: 턴 소모 없음 ────────────────
- if (isFainted || isForceSwitch) {
-    // 유턴 강제교체는 턴을 소모함 (current_order 앞에서 제거)
-    const newOrder  = isForceSwitch ? order.slice(1) : order
-    const isEot     = newOrder.length === 0
+  // ── 기절 교체 or 유턴 강제교체 ───────────────────────────────
+  if (isFainted || isForceSwitch) {
+    const newOrder = isForceSwitch ? order.slice(1) : order
+    const isEot    = newOrder.length === 0
 
     const update = {
       ...buildEntryUpdate(entries),
       [`${mySlot}_active_idx`]:   newIdx,
       [`force_switch_${mySlot}`]: false,
       [`${mySlot}_healWish`]:     false,
-      current_order:   newOrder,
-      turn_count:      isForceSwitch ? (data.turn_count ?? 1) + 1 : (data.turn_count ?? 1),
-      turn_started_at: newOrder.length > 0 ? Date.now() : null,
+      current_order: newOrder,
+      turn_count:    isForceSwitch
+        ? (data.turn_count ?? 1) + 1
+        : (data.turn_count ?? 1),
+      // ✅ 기절 교체일 땐 turn_started_at 갱신 안 함 (p1 타이머 유지)
+      // ✅ 유턴 강제교체일 때만 갱신
+      ...(isForceSwitch
+        ? { turn_started_at: newOrder.length > 0 ? Date.now() : null }
+        : {}
+      ),
     }
 
     PLAYER_SLOTS.forEach(s => {
@@ -151,9 +153,9 @@ export default async function handler(req, res) {
     if (isEot) {
       const result = checkRaidWin(entries, data.boss_current_hp ?? 0)
       if (result) {
-        update.game_over     = true
-        update.raid_result   = result
-        update.current_order = []
+        update.game_over       = true
+        update.raid_result     = result
+        update.current_order   = []
         update.turn_started_at = null
       }
       update.boss_current_hp = data.boss_current_hp ?? 0
@@ -184,13 +186,12 @@ export default async function handler(req, res) {
   })
   update[`${mySlot}_active_idx`] = newIdx
 
-  // EOT 승패 체크
   if (isEot) {
     const result = checkRaidWin(entries, data.boss_current_hp ?? 0)
     if (result) {
-      update.game_over     = true
-      update.raid_result   = result
-      update.current_order = []
+      update.game_over       = true
+      update.raid_result     = result
+      update.current_order   = []
       update.turn_started_at = null
     }
     update.boss_current_hp = data.boss_current_hp ?? 0
