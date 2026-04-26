@@ -1,4 +1,3 @@
-// js/raid.js
 import { auth, db } from "./firebase.js"
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"
 import {
@@ -156,7 +155,8 @@ function updateSlotUI(slot, data) {
     const confusionTag = (pokemon.confusion ?? 0) > 0 ? " [혼란]" : ""
     const flyTag       = pokemon.flyState?.flying  ? " ✈" : ""
     const digTag       = pokemon.digState?.digging ? " ⛏" : ""
-    nameEl.innerText   = (pokemon.name ?? "???") + statusTag + confusionTag + flyTag + digTag
+    const grudgeTag    = pokemon.grudge ? " [원한]" : ""
+    nameEl.innerText   = (pokemon.name ?? "???") + statusTag + confusionTag + flyTag + digTag + grudgeTag
   }
 
   updateHpBar(`${prefix}-hp-bar`, `${prefix}-active-hp`, pokemon.hp, pokemon.maxHp, prefix === "my")
@@ -169,15 +169,25 @@ function updateBossUI(data) {
   const bossMaxHp = data.boss_max_hp ?? 1
   const bossName  = data.boss_name       ?? "보스"
 
-  const nameEl = $("boss-name")
-  if (nameEl) nameEl.innerText = bossName
+  // ── 일루전 분기 ──────────────────────────────────────────────
+  const illusionActive  = data.boss_state?.illusionActive  ?? false
+  const displayHp       = illusionActive && data.boss_state?.illusionHp != null
+                          ? data.boss_state.illusionHp : bossHp
+  const displayName     = illusionActive && data.boss_state?.illusionName
+                          ? data.boss_state.illusionName : bossName
+  const displayPortrait = illusionActive && data.boss_state?.illusionPortrait
+                          ? data.boss_state.illusionPortrait : (data.boss_portrait_url ?? null)
+  // ─────────────────────────────────────────────────────────────
 
-  updateHpBar("boss-hp-bar", "boss-hp-text", bossHp, bossMaxHp, true)
+  const nameEl = $("boss-name")
+  if (nameEl) nameEl.innerText = displayName
+
+  updateHpBar("boss-hp-bar", "boss-hp-text", displayHp, bossMaxHp, true)
 
   const img = $("boss-portrait")
   const ph  = document.querySelector(".boss-portrait-placeholder")
   if (img) {
-    const portrait = data.boss_portrait_url ?? null
+    const portrait = displayPortrait
     if (!portrait) {
       img.classList.remove("visible"); img.style.display = "none"
       if (ph) ph.style.display = "block"
@@ -187,7 +197,7 @@ function updateBossUI(data) {
       img.classList.remove("visible")
       img.style.display = "block"
       img.src = portrait
-      img.alt = bossName
+      img.alt = displayName
       setTimeout(() => img.classList.add("visible"), 60)
     }
   }
@@ -209,7 +219,6 @@ function updateBossUI(data) {
     rankEl.innerText = tags.join(" / ")
   }
 
-  // ── 아기 캥카 UI ──────────────────────────────────────────────────
   updateBabyBossUI(data)
 }
 
@@ -219,20 +228,16 @@ function updateBabyBossUI(data) {
   const bossRow = $("boss-row")
   if (!bossRow) return
 
-  // boss_baby 필드가 없으면 has-baby 클래스 제거하고 종료
   if (!baby) {
     bossRow.classList.remove("has-baby")
     return
   }
 
-  // 아기 캥카 등장: has-baby 클래스 추가
   bossRow.classList.add("has-baby")
 
-  // 이름
   const nameEl = $("baby-name")
   if (nameEl) nameEl.innerText = baby.name ?? "아기 캥카"
 
-  // HP바 + 텍스트
   const hp    = baby.hp    ?? 0
   const maxHp = baby.maxHp ?? 1
   const pct   = maxHp > 0 ? Math.max(0, Math.min(100, hp / maxHp * 100)) : 0
@@ -244,11 +249,9 @@ function updateBabyBossUI(data) {
   }
   if (hpTxt) hpTxt.innerText = `HP: ${hp} / ${maxHp}`
 
-  // 쓰러짐 스타일
   const card = $("baby-hp-card")
   if (card) card.classList.toggle("fainted", hp <= 0)
 
-  // 포트레이트
   const babyImg = $("baby-portrait")
   const babyPh  = document.querySelector(".baby-portrait-placeholder")
   if (babyImg) {
@@ -443,7 +446,6 @@ async function handleLogEntry(entry) {
     case "hit": {
       if (!meta?.defender) break
       if (meta.defender === "boss_baby") {
-        // 아기 캥카 피격 이펙트
         const babyArea = $("baby-boss-area")
         if (babyArea) {
           babyArea.classList.remove("defender-hit"); void babyArea.offsetWidth
@@ -466,7 +468,6 @@ async function handleLogEntry(entry) {
     case "hp": {
       if (!meta?.slot) break
       if (meta.slot === "boss_baby") {
-        // 아기 캥카 HP 애니메이션
         await animateBabyHpBar(meta.hp, meta.maxHp)
         const card = $("baby-hp-card")
         if (card) card.classList.toggle("fainted", meta.hp <= 0)
@@ -522,6 +523,12 @@ async function handleLogEntry(entry) {
       if (entry.text) await showProphecyText(entry.text)
       break
     }
+    // ── 조로아크 일루전 ──────────────────────────────────────────
+    case "zoroark_illusion": {
+      if (meta) activateIllusionUI(meta)
+      await wait(400)
+      break
+    }
     case "revive": {
       if (meta?.slot) {
         const prefix = slotToPrefix(meta.slot)
@@ -536,7 +543,6 @@ async function handleLogEntry(entry) {
       if (text) await typeText(logEl, text)
       if (meta?.slot) {
         if (meta.slot === "boss_baby") {
-          // 아기 캥카 쓰러짐
           const card    = $("baby-hp-card")
           const babyImg = $("baby-portrait")
           if (card)    card.classList.add("fainted")
@@ -746,10 +752,10 @@ function showUmbreonAnimation() {
         }, { once: true })
       }
       doShake()
-    }                        // ← if(wrapper) 닫힘
-  el.classList.remove("umbreon-show"); void el.offsetWidth; el.classList.add("umbreon-show")
+    }
+    el.classList.remove("umbreon-show"); void el.offsetWidth; el.classList.add("umbreon-show")
     setTimeout(resolve, 1400)
-  })                         // ← 여기 }) 추가!
+  })
 }
 
 // ── 마폭시 예언 / 대사 애니메이션 ──────────────────────────────────
@@ -771,7 +777,79 @@ function showProphecyText(text) {
       resolve()
     }, dur)
   })
-}                         
+}
+
+// ── 조로아크 일루전 UI ───────────────────────────────────────────────
+function activateIllusionUI(meta) {
+  const { illusionHp, illusionMaxHp, illusionName, illusionPortrait } = meta
+
+  const bossHpBar  = $("boss-hp-bar")
+  const bossHpText = $("boss-hp-text")
+  if (bossHpBar && illusionMaxHp > 0) {
+    const pct = Math.max(0, Math.min(100, illusionHp / illusionMaxHp * 100))
+    bossHpBar.style.transition      = "width 0.4s ease"
+    bossHpBar.style.width           = pct + "%"
+    bossHpBar.style.backgroundColor = pct > 50 ? "#4caf50" : pct > 20 ? "#ff9800" : "#f44336"
+    if (bossHpText) bossHpText.innerText = `HP: ${illusionHp} / ${illusionMaxHp}`
+    setTimeout(() => { if (bossHpBar) bossHpBar.style.transition = "" }, 420)
+  }
+
+  const bossNameEl = $("boss-name")
+  if (bossNameEl && illusionName) bossNameEl.innerText = illusionName
+
+  const bossImg = $("boss-portrait")
+  const bossPh  = document.querySelector(".boss-portrait-placeholder")
+  if (bossImg && illusionPortrait) {
+    if (bossPh) bossPh.style.display = "none"
+    bossImg.classList.remove("visible")
+    bossImg.style.display = "block"
+    bossImg.src           = illusionPortrait
+    bossImg.alt           = illusionName ?? "???"
+    setTimeout(() => bossImg.classList.add("visible"), 60)
+  }
+
+  let badge = $("illusion-badge")
+  if (!badge) {
+    badge = document.createElement("div")
+    badge.id = "illusion-badge"
+    badge.style.cssText = `
+      position: absolute; top: 4px; right: 6px;
+      background: rgba(104,72,112,0.85);
+      color: #fff; font-size: 10px; padding: 2px 7px;
+      border-radius: 8px; pointer-events: none; z-index: 10;
+      font-weight: bold; letter-spacing: 0.5px;
+    `
+    badge.innerText = "🎭 일루전"
+    const bossArea = $("boss-pokemon-area") ?? document.querySelector(".boss-area")
+    if (bossArea) { bossArea.style.position = "relative"; bossArea.appendChild(badge) }
+  }
+  badge.style.display = "block"
+}
+
+function deactivateIllusionUI(data) {
+  const bossHp    = data.boss_current_hp ?? 0
+  const bossMaxHp = data.boss_max_hp     ?? 1
+  const bossName  = data.boss_name       ?? "조로아크"
+  const portrait  = data.boss_portrait_url ?? null
+
+  const bossHpBar  = $("boss-hp-bar")
+  const bossHpText = $("boss-hp-text")
+  if (bossHpBar) {
+    const pct = bossMaxHp > 0 ? Math.max(0, Math.min(100, bossHp / bossMaxHp * 100)) : 0
+    bossHpBar.style.width           = pct + "%"
+    bossHpBar.style.backgroundColor = pct > 50 ? "#4caf50" : pct > 20 ? "#ff9800" : "#f44336"
+    if (bossHpText) bossHpText.innerText = `HP: ${bossHp} / ${bossMaxHp}`
+  }
+
+  const bossNameEl = $("boss-name")
+  if (bossNameEl) bossNameEl.innerText = bossName
+
+  const bossImg = $("boss-portrait")
+  if (bossImg && portrait) { bossImg.src = portrait; bossImg.alt = bossName }
+
+  const badge = $("illusion-badge")
+  if (badge) badge.style.display = "none"
+}
 
 // ── 기술 버튼 ────────────────────────────────────────────────────────
 function updateMoveButtons(data) {
@@ -801,7 +879,7 @@ function updateMoveButtons(data) {
     const moveInfo = moves[mv.name] ?? {}
     const acc      = moveInfo.alwaysHit ? "필중" : `${moveInfo.accuracy ?? 100}%`
 
-   const isChainBlocked = !!(chainBound && chainBound.moveName === mv.name)
+    const isChainBlocked = !!(chainBound && chainBound.moveName === mv.name)
     const lockedBySeal   = !!(myPokemon?.sealedMove && (myPokemon?.sealedMoveTurns ?? 0) > 0 && mv.name === myPokemon.sealedMove)
 
     if (lockedBySeal) {
@@ -834,7 +912,7 @@ function updateMoveButtons(data) {
     const lockedByOutrage    = !!(myPokemon?.outrageState?.active)
     const lockedByTaunt      = !!((myPokemon?.taunted ?? 0) > 0 && !(moveInfo?.power > 0))
 
-   const canUse = !isSpectator && !fainted && mv.pp > 0 && myTurn && !actionDone
+    const canUse = !isSpectator && !fainted && mv.pp > 0 && myTurn && !actionDone
       && !isChainBlocked && !lockedByTorment && !lockedByNoRepeat && !lockedByThroatChop && !lockedByOutrage && !lockedByTaunt
       && !lockedBySeal
     btn.disabled = !canUse
@@ -845,7 +923,6 @@ function updateMoveButtons(data) {
 function onMoveClick(idx, moveInfo, data) {
   if (actionDone) return
 
-  // ── 치유파동: 아군 선택 팝업 ──
   if (moveInfo?.healPulse) {
     const aliveAllies = otherPlayerSlots().filter(s => {
       const aIdx = data[`${s}_active_idx`] ?? 0
@@ -872,7 +949,6 @@ function onMoveClick(idx, moveInfo, data) {
     return
   }
 
-  // ── 알낳기: 아군/자신 선택 팝업 ──
   if (moveInfo?.eggHeal) {
     const aliveAllies = otherPlayerSlots().filter(s => {
       const aIdx = data[`${s}_active_idx`] ?? 0
@@ -904,7 +980,6 @@ function onMoveClick(idx, moveInfo, data) {
     return
   }
 
-  // ── 꽃가루경단: 아군/적 선택 팝업 ──
   if (moveInfo?.pollenPuff) {
     const aliveAllies = otherPlayerSlots().filter(s => {
       const aIdx = data[`${s}_active_idx`] ?? 0
@@ -951,7 +1026,6 @@ function onMoveClick(idx, moveInfo, data) {
     }
   }
 
-  // ── 도우미: 아군 타겟 선택 팝업 ──
   if (moveInfo?.helper) {
     const aliveAllies = otherPlayerSlots().filter(s => {
       const aIdx = data[`${s}_active_idx`] ?? 0
@@ -981,31 +1055,27 @@ function onMoveClick(idx, moveInfo, data) {
   const hasBeedrills = anyBeedrillAlive(data)
 
   if (moveInfo?.uTurn) {
-  if (hasBeedrills) {
-    const aliveBees = (data.Beedrill ?? []).map((b,i) => ({b,i})).filter(({b}) => b.hp > 0)
-    if (aliveBees.length === 1) {
-      const bIdx = (data.Beedrill ?? []).findIndex(b => b.hp > 0)
-      doUseMove(idx, [`beedrill_${bIdx}`], data)
+    if (hasBeedrills) {
+      const aliveBees = (data.Beedrill ?? []).map((b,i) => ({b,i})).filter(({b}) => b.hp > 0)
+      if (aliveBees.length === 1) {
+        const bIdx = (data.Beedrill ?? []).findIndex(b => b.hp > 0)
+        doUseMove(idx, [`beedrill_${bIdx}`], data)
+      } else {
+        pendingMoveIdx = idx; pendingMoveInfo = moveInfo
+        enterBeedrillTargetMode(data)
+      }
     } else {
-      pendingMoveIdx = idx; pendingMoveInfo = moveInfo
-      enterBeedrillTargetMode(data)
+      const hasBaby   = !!(data.boss_baby && (data.boss_baby.hp ?? 0) > 0)
+      const bossPhase = data.boss_state?.phase ?? 1
+      if (hasBaby && bossPhase === 1) {
+        showBossTargetPopup(idx, moveInfo, data)
+      } else {
+        doUseMove(idx, ["boss"], data)
+      }
     }
- } else {
-    // 아기 캥카 있으면 팝업, 없으면 보스 직빵
-    const hasBaby   = !!(data.boss_baby && (data.boss_baby.hp ?? 0) > 0)
-    const bossPhase = data.boss_state?.phase ?? 1
-    if (hasBaby && bossPhase === 1) {
-      showBossTargetPopup(idx, moveInfo, data)
-    } else {
-      doUseMove(idx, ["boss"], data)
-    }
+    return
   }
-  return
-}
 
-
-
-  // aoe 기술
   if (moveInfo?.aoe || moveInfo?.aoeEnemy) {
     doUseMove(idx, hasBeedrills ? [] : ["boss"], data)
     return
@@ -1022,29 +1092,28 @@ function onMoveClick(idx, moveInfo, data) {
     return
   }
 
- const r = moveInfo?.rank
-const targetsEnemy =
-  !moveInfo?.teamBoost &&
-  !moveInfo?.healPulse &&
-  !moveInfo?.eggHeal &&
-  !moveInfo?.waterHeal &&
-  !moveInfo?.helper &&
-  !moveInfo?.pollenPuff &&
-  (moveInfo?.power || moveInfo?.ghostDive || moveInfo?.futureSight
-  || moveInfo?.taunt || moveInfo?.memento
-  || (r && (r.targetAtk !== undefined || r.targetDef !== undefined || r.targetSpd !== undefined))
-  || moveInfo?.roar || moveInfo?.leechSeed || moveInfo?.chainBind
-  || moveInfo?.dragonTail || moveInfo?.poisonPowder
-  || moveInfo?.curse
-  || (moveInfo?.effect?.volatile && !moveInfo?.targetSelf)
-  || (moveInfo?.effect?.status && moveInfo?.targetSelf === false))
+  const r = moveInfo?.rank
+  const targetsEnemy =
+    !moveInfo?.teamBoost &&
+    !moveInfo?.healPulse &&
+    !moveInfo?.eggHeal &&
+    !moveInfo?.waterHeal &&
+    !moveInfo?.helper &&
+    !moveInfo?.pollenPuff &&
+    (moveInfo?.power || moveInfo?.ghostDive || moveInfo?.futureSight
+    || moveInfo?.taunt || moveInfo?.memento
+    || (r && (r.targetAtk !== undefined || r.targetDef !== undefined || r.targetSpd !== undefined))
+    || moveInfo?.roar || moveInfo?.leechSeed || moveInfo?.chainBind
+    || moveInfo?.dragonTail || moveInfo?.poisonPowder
+    || moveInfo?.curse
+    || (moveInfo?.effect?.volatile && !moveInfo?.targetSelf)
+    || (moveInfo?.effect?.status && moveInfo?.targetSelf === false))
 
   if (!targetsEnemy) {
     doUseMove(idx, [], data)
     return
   }
 
-  // ── 아기 캥카 타겟 선택 (1페이즈, 독침붕 없을 때) ──
   const hasBaby     = !!(data.boss_baby && (data.boss_baby.hp ?? 0) > 0)
   const bossPhase   = data.boss_state?.phase ?? 1
 
@@ -1061,7 +1130,6 @@ const targetsEnemy =
     return
   }
 
-  // 독침붕 없고 1페이즈이고 아기 캥카 살아있으면 타겟 선택 팝업
   if (!hasBeedrills && hasBaby && bossPhase === 1) {
     showBossTargetPopup(idx, moveInfo, data)
     return
@@ -1070,7 +1138,7 @@ const targetsEnemy =
   doUseMove(idx, ["boss"], data)
 }
 
-// ── 보스 타겟 선택 팝업 (엄마/아기 캥카 선택) ────────────────────────
+// ── 보스 타겟 선택 팝업 ──────────────────────────────────────────────
 function showBossTargetPopup(idx, moveInfo, data) {
   const existing = document.getElementById('boss-target-popup')
   if (existing) existing.remove()
@@ -1403,7 +1471,7 @@ function applyRoomData(data) {
   currentRoomData = data
 
   PLAYER_SLOTS.forEach(s => updateSlotUI(s, data))
-  updateBossUI(data)   // 내부에서 updateBabyBossUI 호출
+  updateBossUI(data)
   updateBeedrillUI(data)
   updateOrderDisplay(data)
   updateTurnUI(data)
