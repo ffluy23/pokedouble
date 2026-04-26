@@ -46,12 +46,12 @@ export default async function handler(req, res) {
   logTexts.push(`${fromName}${josa(fromName, "이가")} ${toName}에게 화염구슬을 전달했다!`)
 
   // 수신자가 얼음 상태이면 해제 + 온도 3 복구
-  if (toPkmn.status === "얼음") {
-    toPkmn.status = null
-    update[`${toSlot}_temperature`] = 3
-    update[`${toSlot}_entry`]       = toEntry
-    logTexts.push(`${toPkmn.name}${josa(toPkmn.name, "의")} 얼음이 녹았다! 온도가 3으로 복구됐다!`)
-  }
+ if (toPkmn.status === "얼음") {
+  toPkmn.status = null
+  update[`${toSlot}_entry`] = toEntry
+  logTexts.push(`${toPkmn.name}${josa(toPkmn.name, "의")} 얼음이 녹았다!`)
+}
+update[`${toSlot}_temperature`] = 3  // 항상 3으로 리셋
 
   // 송신자 온도는 유지 (전달 직후 다음 EOT에서 감소 시작)
   // fireball 잃었으니 다음 라운드부터 감소
