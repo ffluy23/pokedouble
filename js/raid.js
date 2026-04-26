@@ -421,6 +421,7 @@ function triggerAutoAction(data) {
   const needsTarget = moveInfo.power || moveInfo.ghostDive || moveInfo.futureSight
     || moveInfo.taunt || moveInfo.memento || moveInfo.leechSeed || moveInfo.chainBind
     || moveInfo.poisonPowder || moveInfo.pollenPuff || moveInfo.curse
+    || moveInfo.telekinesis
     || (moveInfo.effect?.volatile && !moveInfo.targetSelf)
     || (moveInfo.effect?.status && moveInfo.targetSelf === false) || moveInfo.helper
 
@@ -1154,6 +1155,7 @@ function onMoveClick(idx, moveInfo, data) {
     || moveInfo?.roar || moveInfo?.leechSeed || moveInfo?.chainBind
     || moveInfo?.dragonTail || moveInfo?.poisonPowder
     || moveInfo?.curse
+    || moveInfo?.telekinesis 
     || (moveInfo?.effect?.volatile && !moveInfo?.targetSelf)
     || (moveInfo?.effect?.status && moveInfo?.targetSelf === false))
 
