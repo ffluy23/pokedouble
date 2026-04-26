@@ -344,7 +344,6 @@ function attackBeedrill(myPkmn, mySlot, beeSlot, moveName, moveInfo, data, entri
   if (!bee || bee.hp <= 0) { logEntries.push(makeLog("normal", "독침붕은 이미 쓰러졌다!")); return 0 }
 
   const fakeDefender = { type: bee.type, speed: bee.speed ?? 3, ranks: bee.ranks ?? defaultRanks() }
-  const { hit, hitType } = calcHit(myPkmn, moveInfo, fakeDefender)    
 const { hit, hitType } = calcHit(myPkmn, effectiveMoveInfo, bossWithTelekinesis, data.weather ?? null)
   if (!hit) {
     logEntries.push(makeLog("normal", hitType === "evaded"
