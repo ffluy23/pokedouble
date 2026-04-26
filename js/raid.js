@@ -488,7 +488,11 @@ async function handleLogEntry(entry) {
         const prefix  = slotToPrefix(meta.slot)
         if (!prefix) break
         const showNum = prefix === "my" || prefix === "boss"
-        await animateHpBar(prefix, meta.hp, meta.maxHp, showNum)
+        if (prefix === "boss" && currentRoomData?.boss_state?.illusionActive) {
+    // 아무것도 안 함 (일루전 HP 유지)
+  } else {
+    await animateHpBar(prefix, meta.hp, meta.maxHp, showNum)
+  }
         if (text) await typeText(logEl, text)
       }
       await wait(100)
