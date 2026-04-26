@@ -1510,10 +1510,277 @@ function showGameOver(data) {
   if (lb) { lb.style.display = "inline-block"; lb.disabled = false; lb.onclick = leaveGame }
 }
 
+// ══════════════════════════════════════════════════════════════════
+//  raid.js 패치 — 눈여아(Froslass) 전용 UI
+//  기존 raid.js에 아래 내용을 추가/수정
+// ══════════════════════════════════════════════════════════════════
+
+// ── [3] 온도 / 화염구슬 UI 업데이트 ───────────────────────────────
+function updateFroslassUI(data) {
+  if (data.boss_name !== "눈여아") return
+
+  const PLAYER_SLOTS = ["p1", "p2", "p3"]
+  PLAYER_SLOTS.forEach(s => {
+    const prefix  = slotToPrefix(s)
+    if (!prefix) return
+
+    const hasBall = data[`${s}_fireball`]    ?? false
+    const temp    = data[`${s}_temperature`] ?? 3
+
+    // 화염구슬 뱃지
+    let ballEl = document.getElementById(`${prefix}-fireball-badge`)
+    if (!ballEl) {
+      ballEl = document.createElement("div")
+      ballEl.id = `${prefix}-fireball-badge`
+      ballEl.style.cssText = `
+        display:none; font-size:11px; font-weight:bold;
+        background:#e67e22; color:#fff;
+        padding:2px 7px; border-radius:8px;
+        margin-top:3px; text-align:center;
+      `
+      const hpCard = document.getElementById(`${prefix}-active-hp`)?.parentElement
+                   ?? document.querySelector(`#${prefix}-pokemon-area .hp-card`)
+      if (hpCard) hpCard.appendChild(ballEl)
+    }
+    ballEl.style.display = hasBall ? "block" : "none"
+    ballEl.textContent   = "🔥 화염구슬"
+
+    // 온도 표시 (화염구슬 없을 때만)
+    let tempEl = document.getElementById(`${prefix}-temperature`)
+    if (!tempEl) {
+      tempEl = document.createElement("div")
+      tempEl.id = `${prefix}-temperature`
+      tempEl.style.cssText = `
+        font-size:11px; font-weight:bold;
+        padding:2px 7px; border-radius:8px;
+        margin-top:3px; text-align:center;
+        transition: background 0.3s;
+      `
+      const hpCard = document.getElementById(`${prefix}-active-hp`)?.parentElement
+                   ?? document.querySelector(`#${prefix}-pokemon-area .hp-card`)
+      if (hpCard) hpCard.appendChild(tempEl)
+    }
+    if (!hasBall) {
+      tempEl.style.display = "block"
+      tempEl.textContent   = `🌡️ 온도: ${temp}`
+      tempEl.style.background = temp >= 3 ? "#27ae60"
+                               : temp === 2 ? "#f39c12"
+                               : temp === 1 ? "#e67e22"
+                               : "#e74c3c"
+      tempEl.style.color = "#fff"
+    } else {
+      tempEl.style.display = "none"
+    }
+  })
+
+  // 화염구슬 전달 버튼 업데이트
+  updateFireballPassButton(data)
+  // 눈속임 선택 UI 업데이트
+  updateMirageUI(data)
+}
+
+// ── [4] 화염구슬 전달 버튼 ─────────────────────────────────────────
+function updateFireballPassButton(data) {
+  if (data.boss_name !== "눈여아") return
+  if (!mySlot) return
+
+  let btn = document.getElementById("fireball-pass-btn")
+  if (!btn) {
+    btn = document.createElement("button")
+    btn.id = "fireball-pass-btn"
+    btn.style.cssText = `
+      display:none; margin-top:6px;
+      padding:5px 12px; border-radius:8px;
+      border:none; background:#e67e22; color:#fff;
+      font-size:12px; font-weight:bold; cursor:pointer;
+      width:100%; box-sizing:border-box;
+    `
+    // 내 포켓몬 영역 아래에 삽입
+    const myArea = document.getElementById("my-pokemon-area")
+              ?? document.getElementById("my-controls")
+    if (myArea) myArea.appendChild(btn)
+  }
+
+  const iHaveBall = data[`${mySlot}_fireball`] ?? false
+  const canPass   = iHaveBall && !gameOver && !isSpectator
+
+  btn.style.display = iHaveBall ? "block" : "none"
+  btn.textContent   = "🔥 화염구슬 전달"
+  btn.disabled      = !canPass
+
+  btn.onclick = canPass ? () => {
+    playSound(SFX_BTN)
+    showFireballPassPopup(data)
+  } : null
+}
+
+function showFireballPassPopup(data) {
+  const existing = document.getElementById("fireball-pass-popup")
+  if (existing) existing.remove()
+
+  const popup = document.createElement("div")
+  popup.id = "fireball-pass-popup"
+  popup.style.cssText = `
+    position:fixed; top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    z-index:9500;
+    background:#fff; border:2px solid #e67e22;
+    border-radius:12px; padding:16px 18px;
+    font-size:12px; color:#333;
+    display:flex; flex-direction:column; gap:10px;
+    box-shadow:0 4px 24px rgba(0,0,0,0.3);
+    min-width:200px;
+  `
+  const label = document.createElement("div")
+  label.textContent = "🔥 화염구슬 전달 대상"
+  label.style.cssText = "font-weight:bold; color:#e67e22; text-align:center;"
+  popup.appendChild(label)
+
+  const btnWrap = document.createElement("div")
+  btnWrap.style.cssText = "display:flex; flex-direction:column; gap:6px;"
+
+  const targets = ["p1","p2","p3"].filter(s => s !== mySlot)
+  targets.forEach(s => {
+    const idx  = data[`${s}_active_idx`] ?? 0
+    const pkmn = data[`${s}_entry`]?.[idx]
+    if (!pkmn) return
+
+    const name   = pkmn.name ?? s
+    const isFroz = pkmn.status === "얼음"
+    const btn    = document.createElement("button")
+    btn.style.cssText = `
+      padding:7px 12px; border-radius:8px; border:none;
+      background:${isFroz ? "#3498db" : "#e67e22"}; color:#fff;
+      cursor:pointer; font-size:12px; font-weight:bold;
+    `
+    btn.textContent = isFroz ? `❄️ ${name} (얼음 해제!)` : `🔥 ${name}`
+    btn.disabled    = pkmn.hp <= 0
+    btn.onclick     = () => {
+      popup.remove()
+      doPassFireball(mySlot, s)
+    }
+    btnWrap.appendChild(btn)
+  })
+
+  const cancelBtn = document.createElement("button")
+  cancelBtn.textContent = "취소"
+  cancelBtn.style.cssText = "padding:5px; border-radius:8px; border:1px solid #ccc; background:transparent; color:#888; cursor:pointer; font-size:11px;"
+  cancelBtn.onclick = () => popup.remove()
+
+  popup.appendChild(btnWrap)
+  popup.appendChild(cancelBtn)
+  document.body.appendChild(popup)
+}
+
+async function doPassFireball(fromSlot, toSlot) {
+  try {
+    await _passFireball({ roomId: ROOM_ID, fromSlot, toSlot })
+  } catch (e) {
+    alert(`화염구슬 전달 실패: ${e.message}`)
+  }
+}
+
+// ── [5] 눈속임 선택 UI ─────────────────────────────────────────────
+function updateMirageUI(data) {
+  if (data.boss_name !== "눈여아") return
+
+  const mirageActive = data.boss_state?.mirageActive ?? false
+  let overlay = document.getElementById("mirage-overlay")
+
+  if (!mirageActive) {
+    if (overlay) overlay.style.display = "none"
+    mirageSelectMode = false
+    return
+  }
+
+  // 내 턴이고 행동 안 했을 때만 눈속임 선택 표시
+  if (!myTurn || actionDone || isSpectator) {
+    if (overlay) overlay.style.display = "none"
+    return
+  }
+
+  if (!overlay) {
+    overlay = document.createElement("div")
+    overlay.id = "mirage-overlay"
+    overlay.style.cssText = `
+      position:fixed; top:0; left:0; width:100%; height:100%;
+      background:rgba(10,20,60,0.55); z-index:8000;
+      display:flex; flex-direction:column;
+      align-items:center; justify-content:center; gap:16px;
+    `
+    document.body.appendChild(overlay)
+  }
+  overlay.innerHTML = ""
+  overlay.style.display = "flex"
+  mirageSelectMode = true
+
+  const title = document.createElement("div")
+  title.style.cssText = `
+    color:#e0efff; font-size:15px; font-weight:bold;
+    text-shadow:0 0 12px #6dc8eb; letter-spacing:1px;
+    text-align:center;
+  `
+  title.textContent = "❄️ 눈보라 속에서 눈여아의 형상이 흩어진다…\n어느 것이 진짜인가?"
+  title.style.whiteSpace = "pre-line"
+  overlay.appendChild(title)
+
+  const btnRow = document.createElement("div")
+  btnRow.style.cssText = "display:flex; gap:16px;"
+
+  for (let i = 0; i < 3; i++) {
+    const btn = document.createElement("button")
+    btn.style.cssText = `
+      width:80px; height:80px; border-radius:50%;
+      border:3px solid #6dc8eb;
+      background:rgba(109,200,235,0.18);
+      color:#e0efff; font-size:22px;
+      cursor:pointer; font-weight:bold;
+      transition:background 0.2s, transform 0.15s;
+      box-shadow:0 0 16px rgba(109,200,235,0.4);
+    `
+    btn.textContent = "❄️"
+    btn.onmouseover = () => { btn.style.background = "rgba(109,200,235,0.45)"; btn.style.transform = "scale(1.08)" }
+    btn.onmouseout  = () => { btn.style.background = "rgba(109,200,235,0.18)"; btn.style.transform = "scale(1)" }
+    btn.onclick     = () => {
+      overlay.style.display = "none"
+      mirageSelectMode = false
+      doAttackMirage(i)
+    }
+    btnRow.appendChild(btn)
+  }
+  overlay.appendChild(btnRow)
+
+  const hint = document.createElement("div")
+  hint.style.cssText = "color:#9ecfef; font-size:11px; text-align:center;"
+  hint.textContent = "형상을 선택해 공격하세요. 가짜를 고르면 온도가 내려갑니다!"
+  overlay.appendChild(hint)
+}
+
+async function doAttackMirage(mirageIdx) {
+  if (actionDone) return
+  actionDone = true
+  try {
+    const result = await _attackMirage({ roomId: ROOM_ID, mySlot, mirageIdx })
+    if (result.isReal) {
+      // 진짜 맞췄으면 정상 기술 선택으로 이어서 행동
+      // (눈속임은 해제되어 일반 기술 버튼이 활성화됨)
+      actionDone = false
+    }
+    // 가짜면 턴 소모 없이 온도만 감소 → 일반 행동 계속 가능
+    if (!result.isReal) actionDone = false
+  } catch (e) {
+    console.error("mirage attack 오류:", e.message)
+    actionDone = false
+  }
+}
+
+
 async function doSkipTurn(timerExpired = false) {
   try { await _skipTurn({ roomId: ROOM_ID, mySlot, timerExpired }) }
   catch (e) { console.warn("skipTurn 오류:", e.message); actionDone = false }
 }
+
+
 
 // ── applyRoomData ────────────────────────────────────────────────────
 function applyRoomData(data) {
@@ -1521,6 +1788,7 @@ function applyRoomData(data) {
 
   PLAYER_SLOTS.forEach(s => updateSlotUI(s, data))
   updateBossUI(data)
+  updateFroslassUI(data)
   updateBeedrillUI(data)
   updateOrderDisplay(data)
   updateTurnUI(data)
