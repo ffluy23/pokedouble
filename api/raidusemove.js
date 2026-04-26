@@ -769,6 +769,28 @@ if ((data.boss_telekinesis ?? 0) > 0) {
     }
   }
 
+  // ── 눈여아 EOT: 온도 감소 ──────────────────────────────────────
+  if (data.boss_name === "눈여아") {
+    PLAYER_SLOTS.forEach(s => {
+      if (data[`${s}_fireball`]) return
+      const cur  = data[`${s}_temperature`] ?? 3
+      const next = Math.max(0, cur - 1)
+      data[`${s}_temperature`] = next
+      if (next < cur) {
+        const slotName = (data[`${s.replace("p","player")}_name`] ?? s).split("]").pop().trim()
+        eotLogs.push(makeLog("normal", `${slotName}의 온도가 내려갔다! (현재: ${next})`))
+      }
+      if (next <= 0) {
+        const idx  = data[`${s}_active_idx`] ?? 0
+        const pkmn = entries[s]?.[idx]
+        if (pkmn && pkmn.hp > 0 && !pkmn.status) {
+          pkmn.status = "얼음"
+          eotLogs.push(makeLog("normal", `${pkmn.name}${josa(pkmn.name, "은는")} 얼어붙었다!`))
+        }
+      }
+    })
+  }
+
   if (eotLogs.length > 0) {
     const logsRef = db.collection("raid").doc(roomId).collection("logs")
     const base    = Date.now()
@@ -783,6 +805,14 @@ if ((data.boss_telekinesis ?? 0) > 0) {
   update.boss_seeder     = data.boss_seeder     ?? null
   update.boss_current_hp = data.boss_current_hp ?? 0
   update.boss_volatile   = data.boss_volatile   ?? {}
+
+  // ← 여기
+  if (data.boss_name === "눈여아") {
+    PLAYER_SLOTS.forEach(s => {
+      update[`${s}_temperature`] = data[`${s}_temperature`] ?? 3
+      update[`${s}_fireball`]    = data[`${s}_fireball`]    ?? false
+    })
+  }
 
   return checkRaidWin(entries, data.boss_current_hp ?? 0)
 }
