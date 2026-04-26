@@ -42,9 +42,8 @@ const _agreeSync     = (data) => callApi("raidagreesync",     data)
 const _rejectSync    = (data) => callApi("raidrejectsync",    data)
 const _leaveGame     = (data) => callApi("raidleavegame",     data)
 const _bossTurn      = (data) => callApi("raidbossturn",      data)
-const _passFireball  = (data) => callApi("raidpassfireball",  data)
-const _attackMirage  = (data) => callApi("raidattackmirage",  data)
-
+const _passFireball  = (data) => callApi("raidPassFireball",  data)
+const _attackMirage  = (data) => callApi("raidAttackMirage",  data)
 const roomRef = doc(db, "raid", ROOM_ID)
 const logsRef = collection(db, "raid", ROOM_ID, "logs")
 
