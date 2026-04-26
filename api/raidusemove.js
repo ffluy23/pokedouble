@@ -19,7 +19,7 @@ import {
   deepCopyEntries, corsHeaders, rollD10
 } from "../lib/gameUtils.js"
 import { recordMalamarMove } from "../lib/bosses/malamar.js"
-import { trackZoroarkProvoke } from "../lib/zoroarkcommands.js"
+import { recordZoroarkHit } from "../lib/bosses/zoroark.js"
 
 
 const PLAYER_SLOTS = ["p1", "p2", "p3"]
@@ -316,9 +316,6 @@ function applyDmgMultipliers(finalDmg, moveInfo, moveName, myPkmn, targetStatus,
 
 // ── 누리레느 딜체크 누적 헬퍼 ────────────────────────────────────────
 function trackDealCheck(data, mySlot, dmg) {
-  if (data.boss_name === "조로아크") {
-  trackZoroarkProvoke(mySlot, finalDmg, data)
-}
   if (dmg <= 0) return
   data[`${mySlot}_total_damage`] = (data[`${mySlot}_total_damage`] ?? 0) + dmg
   data.boss_last_attacker = mySlot
@@ -526,9 +523,6 @@ function handleTwoTurnAttack(myPkmn, mySlot, targetSlot, entries, data, logEntri
       logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
       if (mult3 > 1) logEntries.push(makeLog("after_hit", "효과가 굉장했다!"))
       if (mult3 < 1) logEntries.push(makeLog("after_hit", "효과가 별로인 듯하다…"))
-        if (data.boss_name === "조로아크") {
-  trackZoroarkProvoke(mySlot, finalDmg, data)
-}
       if (crit3)     logEntries.push(makeLog("after_hit", "급소에 맞았다!"))
       if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
       trackDealCheck(data, mySlot ?? "p1", finalDmg)
@@ -1408,9 +1402,7 @@ myPkmn.roostTurns = 2
               if (isAssistCaster) logEntries.push(makeLog("after_hit", "어시스트 효과로 위력이 올라갔다!"))
               if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
               trackDealCheck(data, mySlot, finalDmg)
-            if (data.boss_name === "조로아크") {
-  trackZoroarkProvoke(mySlot, finalDmg, data)
-}
+           
             }
           }
         } else {
@@ -1595,12 +1587,11 @@ myPkmn.roostTurns = 2
 
                   finalDmg = applyDmgMultipliers(finalDmg, moveInfo, moveData.name, myPkmn, data.boss_status ?? null, data.boss_current_hp ?? 0, data.boss_max_hp ?? 1, logEntries)
                   finalDmg = Math.max(1, finalDmg)
-                  if (data.boss_name === "조로아크") {
-  trackZoroarkProvoke(mySlot, finalDmg, data)
-}
                   data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - finalDmg)
                   // ── [추가] 누리레느 딜체크 누적 ──────────────
+                  //조로아크 딜체크 추척
                   trackDealCheck(data, mySlot, finalDmg)
+                  recordZoroarkHit(mySlot, finalDmg, data)
                   // ── 마폭시 예언 추적 ──────────────────────────
                   trackProphecyData(mySlot, moveData.name, !!(moveInfo?.power > 0), finalDmg, data)
 

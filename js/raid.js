@@ -523,6 +523,10 @@ async function handleLogEntry(entry) {
       if (entry.text) await showProphecyText(entry.text)
       break
     }
+    case "taunt_text": {
+      if (entry.text) await showTauntText(entry.text)
+      break
+    }
     // ── 조로아크 일루전 ──────────────────────────────────────────
     case "zoroark_illusion": {
       if (meta) activateIllusionUI(meta)
@@ -776,6 +780,44 @@ function showProphecyText(text) {
       el.classList.remove("prophecy-show", "prophecy-show-short")
       resolve()
     }, dur)
+  })
+}
+
+// ── 조로아크 도발 텍스트 (5초간 상단 표시) ──────────────────────────
+function showTauntText(text) {
+  return new Promise(resolve => {
+    let el = $("taunt-anim")
+    if (!el) {
+      el = document.createElement("div")
+      el.id = "taunt-anim"
+      el.style.cssText = `
+        position: fixed; top: 60px; left: 50%;
+        transform: translateX(-50%);
+        background: rgba(76,73,72,0.92);
+        color: #fff; font-size: 13px; font-weight: bold;
+        padding: 10px 20px; border-radius: 10px;
+        border: 2px solid #684870;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.4);
+        z-index: 9999; text-align: center;
+        max-width: 80vw; word-break: keep-all;
+        display: none;
+        font-style: italic;
+        letter-spacing: 0.3px;
+      `
+      document.body.appendChild(el)
+    }
+    el.innerText = `🎭 "${text}"`
+    el.style.display = "block"
+    el.style.opacity = "1"
+    setTimeout(() => {
+      el.style.transition = "opacity 0.6s"
+      el.style.opacity    = "0"
+      setTimeout(() => {
+        el.style.display    = "none"
+        el.style.transition = ""
+        resolve()
+      }, 600)
+    }, 5000)
   })
 }
 
