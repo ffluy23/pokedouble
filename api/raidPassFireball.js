@@ -56,7 +56,7 @@ export default async function handler(req, res) {
   // 송신자 온도는 유지 (전달 직후 다음 EOT에서 감소 시작)
   // fireball 잃었으니 다음 라운드부터 감소
   const fromTemp = data[`${fromSlot}_temperature`] ?? 3
-  update[`${fromSlot}_temperature`] = fromTemp  // 현재 값 유지, 다음 EOT에서 감소
+  
 
   const logsRef = db.collection("raid").doc(roomId).collection("logs")
   const base    = Date.now()
