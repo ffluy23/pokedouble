@@ -55,7 +55,7 @@ update[`${toSlot}_temperature`] = 3  // 항상 3으로 리셋
 
   // 송신자 온도는 유지 (전달 직후 다음 EOT에서 감소 시작)
   // fireball 잃었으니 다음 라운드부터 감소
-  const fromTemp = data[`${fromSlot}_temperature`] ?? 3
+  update[`${fromSlot}_temperature`] = 3
   
 
   const logsRef = db.collection("raid").doc(roomId).collection("logs")
