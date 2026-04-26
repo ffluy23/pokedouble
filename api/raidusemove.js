@@ -1792,26 +1792,26 @@ myPkmn.roostTurns = 2
   if (assistEventTs !== null) update.assist_event = { ts: assistEventTs }
   if (syncEventTs   !== null) update.sync_event   = { ts: syncEventTs }
 
-  // ── 닌자스크 3페이즈 전환 (victory 판정 전에 가로채기) ──────────
+// ── 닌자스크 3페이즈 전환 (victory 판정 전에 가로채기) ──────────
   if (isNinjaskPhase3Trigger(data)) {
-    const snap2   = await db.collection("boss").doc("ninjask").get()
-    const shed    = (snap2.data() ?? {}).shedinja ?? {}
+    const snap2 = await db.collection("boss").doc("ninjask").get()
+    const shed  = (snap2.data() ?? {}).shedinja ?? {}
     buildShedinjaTransition(data, shed, logEntries)
-    // 전환 로그를 update에 반영
-    update.boss_current_hp  = data.boss_current_hp
-    update.boss_max_hp      = data.boss_max_hp
-    update.boss_name        = data.boss_name
-    update.boss_attack      = data.boss_attack
-    update.boss_defense     = data.boss_defense
-    update.boss_speed       = data.boss_speed
-    update.boss_portrait    = data.boss_portrait
-    update.boss_type        = data.boss_type
-    update.boss_state       = data.boss_state
-    update._phase3Entered   = data._phase3Entered
-    // 전환 로그 먼저 기록
-    await writeLogs(roomId, logEntries)
-    logEntries.length = 0
+    update.boss_current_hp = data.boss_current_hp
+    update.boss_max_hp     = data.boss_max_hp
+    update.boss_name       = data.boss_name
+    update.boss_attack     = data.boss_attack
+    update.boss_defense    = data.boss_defense
+    update.boss_speed      = data.boss_speed
+    update.boss_portrait   = data.boss_portrait
+    update.boss_type       = data.boss_type
+    update.boss_state      = data.boss_state
+    update._phase3Entered  = data._phase3Entered
   }
+
+  const { assistEventTs, syncEventTs } = await writeLogs(roomId, logEntries)
+  if (assistEventTs !== null) update.assist_event = { ts: assistEventTs }
+  if (syncEventTs   !== null) update.sync_event   = { ts: syncEventTs }
 
   const earlyResult = checkRaidWin(entries, data.boss_current_hp ?? 0)
 
