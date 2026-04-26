@@ -290,7 +290,7 @@ rank: { targetAtk: -2, turns: 2 } },
   "치유소원": { power: 0, type: "에스퍼", accuracy: 100, alwaysHit: true,
               effect: null, targetSelf: true, healWish: true },
 "텔레키네시스": { power: 0, type: "에스퍼", accuracy: 100, alwaysHit: true,
-                  effect: null, telekinesis: true, targetSelf: false },
+                  effect: null, telekinesis: true },
 
   // ───── 벌레 ─────
   "달려들기":   { power: 40, type: "벌레", accuracy: 100, alwaysHit: false,
