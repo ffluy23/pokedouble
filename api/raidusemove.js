@@ -344,7 +344,7 @@ function attackBeedrill(myPkmn, mySlot, beeSlot, moveName, moveInfo, data, entri
   if (!bee || bee.hp <= 0) { logEntries.push(makeLog("normal", "독침붕은 이미 쓰러졌다!")); return 0 }
 
   const fakeDefender = { type: bee.type, speed: bee.speed ?? 3, ranks: bee.ranks ?? defaultRanks() }
-const { hit, hitType } = calcHit(myPkmn, effectiveMoveInfo, bossWithTelekinesis, data.weather ?? null)
+  const { hit, hitType } = calcHit(myPkmn, moveInfo, fakeDefender)
   if (!hit) {
     logEntries.push(makeLog("normal", hitType === "evaded"
       ? `독침붕${josa("독침붕", "이가")} 피했다!`
@@ -1788,9 +1788,6 @@ myPkmn.roostTurns = 2
   }
   // ───────────────────────────────────────────────────────────────
 
-  const { assistEventTs, syncEventTs } = await writeLogs(roomId, logEntries)
-  if (assistEventTs !== null) update.assist_event = { ts: assistEventTs }
-  if (syncEventTs   !== null) update.sync_event   = { ts: syncEventTs }
 
 // ── 닌자스크 3페이즈 전환 (victory 판정 전에 가로채기) ──────────
   if (isNinjaskPhase3Trigger(data)) {
