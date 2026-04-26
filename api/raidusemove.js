@@ -125,6 +125,7 @@ function calcHit(atk, moveInfo, def, weather = null) {
     if (weather === "쾌청") accuracy = 50
   }
   if ((atk.telekinesis ?? 0) > 0) return { hit: true, hitType: "hit" }
+if ((def.telekinesis ?? 0) > 0) return { hit: true, hitType: "hit" }
   if (Math.random() * 100 >= accuracy) return { hit: false, hitType: "missed" }
   if (def.flyState?.flying  && !moveInfo.twister) return { hit: false, hitType: "evaded" }
   if (def.digState?.digging && moveInfo._name !== "지진") return { hit: false, hitType: "evaded" }
@@ -342,7 +343,8 @@ function attackBeedrill(myPkmn, mySlot, beeSlot, moveName, moveInfo, data, entri
   if (!bee || bee.hp <= 0) { logEntries.push(makeLog("normal", "독침붕은 이미 쓰러졌다!")); return 0 }
 
   const fakeDefender = { type: bee.type, speed: bee.speed ?? 3, ranks: bee.ranks ?? defaultRanks() }
-  const { hit, hitType } = calcHit(myPkmn, moveInfo, fakeDefender)
+  const { hit, hitType } = calcHit(myPkmn, moveInfo, fakeDefender)    
+const { hit, hitType } = calcHit(myPkmn, effectiveMoveInfo, bossWithTelekinesis, data.weather ?? null)
   if (!hit) {
     logEntries.push(makeLog("normal", hitType === "evaded"
       ? `독침붕${josa("독침붕", "이가")} 피했다!`
@@ -603,6 +605,7 @@ async function finishTurn(roomRef, roomId, data, entries, logEntries, extraUpdat
     boss_prophecyLastMoves:  data.boss_prophecyLastMoves  ?? {},
     _phase3Entered:          data._phase3Entered          ?? false,
     boss_last_attacker: data.boss_last_attacker ?? null,
+     boss_telekinesis: data.boss_telekinesis ?? 0, 
     ...(data.boss_baby !== undefined ? { boss_baby: data.boss_baby } : {}),
   }
   PLAYER_SLOTS.forEach(s => {
@@ -733,6 +736,13 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
     }
     if (tPkmn.hp <= 0) eotLogs.push(makeLog("faint", `${tPkmn.name}${josa(tPkmn.name, "은는")} 쓰러졌다!`, { slot: tSlot }))
   }
+
+  // 그 위에 추가
+if ((data.boss_telekinesis ?? 0) > 0) {
+  data.boss_telekinesis--
+  if (!data.boss_telekinesis)
+    eotLogs.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 다시 땅에 내려왔다!`))
+}
 
   if ((data.boss_volatile?.cursed) && (data.boss_current_hp ?? 0) > 0) {
     const dmg = Math.max(1, Math.floor((data.boss_max_hp ?? 1) / 64))
@@ -1240,20 +1250,25 @@ export default async function handler(req, res) {
             }
           }
           specialHandled = true
-        } else if (moveInfo?.telekinesis) {
-          const telTargets = tSlots.filter(s => PLAYER_SLOTS.includes(s) && s !== mySlot)
-          if (telTargets.length === 0) {
-            logEntries.push(makeLog("normal", "대상이 없다!"))
-          } else {
-            for (const ts of telTargets) {
-              const tIdx  = data[`${ts}_active_idx`] ?? 0
-              const tPkmn = entries[ts]?.[tIdx]
-              if (!tPkmn || tPkmn.hp <= 0) { logEntries.push(makeLog("normal", "대상이 쓰러져 있다!")); continue }
-              tPkmn.telekinesis = 3
-              logEntries.push(makeLog("normal", `${tPkmn.name}${josa(tPkmn.name, "은는")} 텔레키네시스로 떠올랐다! (3턴간 모든 공격 명중)`))
-            }
-          }
-          specialHandled = true
+       } else if (moveInfo?.telekinesis) {
+  const allyTargets = tSlots.filter(s => PLAYER_SLOTS.includes(s) && s !== mySlot)
+  const isBossTarget = tSlots.includes("boss")
+  if (allyTargets.length === 0 && !isBossTarget) {
+    logEntries.push(makeLog("normal", "대상이 없다!"))
+  } else {
+    if (isBossTarget) {
+      data.boss_telekinesis = 3
+      logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 텔레키네시스로 떠올랐다! (3턴간 모든 공격 명중)`))
+    }
+    for (const ts of allyTargets) {
+      const tIdx  = data[`${ts}_active_idx`] ?? 0
+      const tPkmn = entries[ts]?.[tIdx]
+      if (!tPkmn || tPkmn.hp <= 0) { logEntries.push(makeLog("normal", "대상이 쓰러져 있다!")); continue }
+      tPkmn.telekinesis = 3
+      logEntries.push(makeLog("normal", `${tPkmn.name}${josa(tPkmn.name, "은는")} 텔레키네시스로 떠올랐다! (3턴간 모든 공격 명중)`))
+    }
+  }
+  specialHandled = true
           } else if (moveInfo?.counter) {
   const lastDmg = myPkmn.last_damage_taken ?? 0
   if (lastDmg <= 0) {
@@ -1754,6 +1769,7 @@ myPkmn.roostTurns = 2
     boss_lastHitSlot:        data.boss_lastHitSlot        ?? null,
     boss_prophecyLastMoves:  data.boss_prophecyLastMoves  ?? {},
     _phase3Entered:          data._phase3Entered          ?? false,
+    boss_telekinesis: data.boss_telekinesis ?? 0, 
     ...(data.boss_baby !== undefined ? { boss_baby: data.boss_baby } : {}),
   }
   PLAYER_SLOTS.forEach(s => {
