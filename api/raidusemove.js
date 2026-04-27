@@ -1912,10 +1912,13 @@ myPkmn.roostTurns = 2
                   finalDmg = applyDmgMultipliers(finalDmg, moveInfo, moveData.name, myPkmn, data.boss_status ?? null, data.boss_current_hp ?? 0, data.boss_max_hp ?? 1, logEntries)
                   finalDmg = Math.max(1, finalDmg)
                 if (data.boss_name === "누클라바스" && (data.boss_state?.phase ?? 1) === 1) {
-                    // 1페이즈: boss_current_hp 안 깎고 누적 딜만 기록
+                    // 1페이즈: 플레이어 딜은 무조건 10 고정으로 누적
+                    const fixedDmg = 10
+                    data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - fixedDmg)
+                    logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
                     data.boss_state = {
                       ...(data.boss_state ?? {}),
-                      totalDmgTaken: (data.boss_state?.totalDmgTaken ?? 0) + finalDmg,
+                      totalDmgTaken: (data.boss_state?.totalDmgTaken ?? 0) + fixedDmg,
                     }
                   } else if (data.boss_state?.isShedinja) {
                     logEntries.push(makeLog("normal", "공격이 스쳐 지나간다... 아무것도 닿지 않는다."))
