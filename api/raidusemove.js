@@ -73,10 +73,16 @@ function getBaseStat(pokemon, key) {
 function checkRaidWin(entries, bossHp, data = null) {
   if (bossHp <= 0) return "victory"
   const slots = data ? (data.active_slots ?? {}) : null
-  const allDead = PLAYER_SLOTS.every(s => {
-    if (slots && !slots[s]) return true   // 빈 슬롯 = 전멸 취급
-    return (entries[s] ?? []).every(p => p.hp <= 0)
-  })
+
+  const activeSlotList = slots
+    ? PLAYER_SLOTS.filter(s => slots[s] != null)
+    : PLAYER_SLOTS
+
+  if (activeSlotList.length === 0) return "defeat"
+
+  const allDead = activeSlotList.every(s =>
+    (entries[s] ?? []).every(p => p.hp <= 0)
+  )
   if (allDead) return "defeat"
   return null
 }
