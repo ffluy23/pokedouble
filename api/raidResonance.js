@@ -54,10 +54,18 @@ export default async function handler(req, res) {
     await writeLogs(roomId, [makeLog("normal", getResonancePlayerLog(nick))])
 
     // 전원 동의 시 어드민 발동 가능 상태로 변경
-    const totalPlayers = PLAYER_SLOTS.filter(s => {
-      const slotKey = s.replace("p", "player")
-      return data[`${slotKey}_uid`]
-    }).length
+// 전원 동의 시 어드민 발동 가능 상태로 변경
+let totalPlayers
+if (data.active_slots) {
+  // 40인: active_slots에서 실제 출전 중인 슬롯 수
+  totalPlayers = Object.values(data.active_slots).filter(uid => !!uid).length
+} else {
+  // 기존 3인
+  totalPlayers = PLAYER_SLOTS.filter(s => {
+    const slotKey = s.replace("p", "player")
+    return data[`${slotKey}_uid`]
+  }).length
+}
     if (newAgreed.length >= totalPlayers) {
       await roomRef.update({ resonance_ready: true })
     }

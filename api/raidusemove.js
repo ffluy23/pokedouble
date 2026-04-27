@@ -1,6 +1,13 @@
 // api/raidUseMove.js
 import { db } from "../lib/firestore.js"
-import { executeBossAction, deepCopyEntries as deepCopyRaidEntries2, checkRaidWin as checkRaidWin2, PLAYER_SLOTS as PS } from "../lib/raidBossAction.js"
+import {
+  executeBossAction,
+  deepCopyEntries as deepCopyRaidEntries2,
+  checkRaidWin as checkRaidWin2,
+  PLAYER_SLOTS as PS,
+  hydrateSlotData,      // [40인] 신규
+  dehydrateSlotData,    // [40인] 신규
+} from "../lib/raidBossAction.js"
 import { activateUmbreon } from "../lib/umbreon.js"
 import { moves } from "../lib/moves.js"
 import { getTypeMultiplier } from "../lib/typeChart.js"
@@ -59,20 +66,47 @@ function getBaseStat(pokemon, key) {
   return pokemon[key === "atk" ? "attack" : key === "def" ? "defense" : "speed"] ?? 3
 }
 
-function checkRaidWin(entries, bossHp) {
+// ════════════════════════════════════════════════════════════════════
+//  [40인 레이드] checkRaidWin — data 인자 추가 버전 사용
+//  active_slots가 있으면 빈 슬롯을 "전멸"로 취급
+// ════════════════════════════════════════════════════════════════════
+function checkRaidWin(entries, bossHp, data = null) {
   if (bossHp <= 0) return "victory"
-  const allDead = PLAYER_SLOTS.every(s => (entries[s] ?? []).every(p => p.hp <= 0))
+  const slots = data ? (data.active_slots ?? {}) : null
+  const allDead = PLAYER_SLOTS.every(s => {
+    if (slots && !slots[s]) return true   // 빈 슬롯 = 전멸 취급
+    return (entries[s] ?? []).every(p => p.hp <= 0)
+  })
   if (allDead) return "defeat"
   return null
 }
 
+// ════════════════════════════════════════════════════════════════════
+//  [40인 레이드] deepCopyRaidEntries
+//  roster + active_slots가 있으면 hydrateSlotData를 통해 펼침
+//  없으면 기존 방식 그대로 (하위 호환)
+// ════════════════════════════════════════════════════════════════════
 function deepCopyRaidEntries(data) {
+  // active_slots가 존재하면 roster 기반으로 hydrate 후 복사
+  if (data.active_slots) {
+    hydrateSlotData(data)   // data에 p1_entry 등을 직접 주입
+  }
   const entries = {}
-  PLAYER_SLOTS.forEach(s => { entries[s] = JSON.parse(JSON.stringify(data[`${s}_entry`] ?? [])) })
+  PLAYER_SLOTS.forEach(s => {
+    entries[s] = JSON.parse(JSON.stringify(data[`${s}_entry`] ?? []))
+  })
   return entries
 }
 
-function buildRaidEntryUpdate(entries) {
+// ════════════════════════════════════════════════════════════════════
+//  [40인 레이드] buildRaidEntryUpdate
+//  active_slots가 있으면 roster 패치 반환, 없으면 기존 방식
+// ════════════════════════════════════════════════════════════════════
+function buildRaidEntryUpdate(entries, data = null) {
+  if (data?.active_slots) {
+    return dehydrateSlotData(data, entries)   // { "roster.{uid}.entry": [...], ... }
+  }
+  // 기존 방식 (하위 호환)
   const update = {}
   PLAYER_SLOTS.forEach(s => { update[`${s}_entry`] = entries[s] })
   return update
@@ -129,7 +163,7 @@ function calcHit(atk, moveInfo, def, weather = null) {
     if (weather === "쾌청") accuracy = 50
   }
   if ((atk.telekinesis ?? 0) > 0) return { hit: true, hitType: "hit" }
-if ((def.telekinesis ?? 0) > 0) return { hit: true, hitType: "hit" }
+  if ((def.telekinesis ?? 0) > 0) return { hit: true, hitType: "hit" }
   if (Math.random() * 100 >= accuracy) return { hit: false, hitType: "missed" }
   if (def.flyState?.flying  && !moveInfo.twister) return { hit: false, hitType: "evaded" }
   if (def.digState?.digging && moveInfo._name !== "지진") return { hit: false, hitType: "evaded" }
@@ -319,7 +353,6 @@ function applyDmgMultipliers(finalDmg, moveInfo, moveName, myPkmn, targetStatus,
   return finalDmg
 }
 
-// ── 누리레느 딜체크 누적 헬퍼 ────────────────────────────────────────
 function trackDealCheck(data, mySlot, dmg) {
   if (dmg <= 0) return
   data[`${mySlot}_total_damage`] = (data[`${mySlot}_total_damage`] ?? 0) + dmg
@@ -359,7 +392,7 @@ function attackBeedrill(myPkmn, mySlot, beeSlot, moveName, moveInfo, data, entri
     data.boss_lightScreen = 0
     logEntries.push(makeLog("normal", `보스${josa("보스", "의")} 빛의장막이 부서졌다!`))
   }
- if (moveInfo?.breakBarrier && (data.boss_reflectorTurns ?? 0) > 0) {
+  if (moveInfo?.breakBarrier && (data.boss_reflectorTurns ?? 0) > 0) {
     data.boss_reflectorTurns = 0
     logEntries.push(makeLog("normal", `${data.boss_name ?? "보스"}${josa(data.boss_name ?? "보스", "의")} 리플렉터가 부서졌다!`))
   }
@@ -432,6 +465,8 @@ function applyAoeFriendlyFire(myPkmn, mySlot, moveName, entries, data, logEntrie
   const dice = rollD10()
   for (const s of PLAYER_SLOTS) {
     if (s === mySlot) continue
+    // [40인] 빈 슬롯 스킵
+    if (data.active_slots && !data.active_slots[s]) continue
     const idx  = data[`${s}_active_idx`] ?? 0
     const ally = entries[s]?.[idx]
     if (!ally || ally.hp <= 0) continue
@@ -574,7 +609,6 @@ function applyDamagesToPlayers(damages, entries, data, logEntries) {
       pkmn.bideState.lastAttackerSlot = "boss"
     }
 
-    // ── [누클라바스] 비극 역방향: 플레이어가 피해받으면 보스도 공유 ──
     if (data.boss_name === "누클라바스" && data[`${slot}_tragedy`] && (data.boss_current_hp ?? 0) > 0) {
       const sharedDmg = Math.max(1, Math.floor(dmg * 0.5))
       data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - sharedDmg)
@@ -584,11 +618,18 @@ function applyDamagesToPlayers(damages, entries, data, logEntries) {
   }
 }
 
+// ════════════════════════════════════════════════════════════════════
+//  [40인 레이드] finishTurn
+//  buildRaidEntryUpdate(entries, data)로 roster 패치 적용
+//  active_slots 보존 추가
+// ════════════════════════════════════════════════════════════════════
 async function finishTurn(roomRef, roomId, data, entries, logEntries, extraUpdate = {}) {
   const { assistEventTs, syncEventTs } = await writeLogs(roomId, logEntries)
   const newOrder = (data.current_order ?? []).slice(1)
   const update   = {
-    ...buildRaidEntryUpdate(entries),
+    ...buildRaidEntryUpdate(entries, data),   // [40인] data 전달 → roster 패치
+    // [40인] active_slots 항상 보존
+    ...(data.active_slots ? { active_slots: data.active_slots } : {}),
     boss_current_hp: data.boss_current_hp ?? 0,
     boss_rank:       data.boss_rank       ?? defaultRanks(),
     boss_status:     data.boss_status     ?? null,
@@ -630,8 +671,15 @@ async function finishTurn(roomRef, roomId, data, entries, logEntries, extraUpdat
     if (data[`${s}_active_idx`] !== undefined) update[`${s}_active_idx`] = data[`${s}_active_idx`]
     if (data[`${s}_last_move`]  !== undefined) update[`${s}_last_move`]  = data[`${s}_last_move`]
     update[`${s}_total_damage`] = data[`${s}_total_damage`] ?? 0
+    // [40인] roster에도 active_idx 반영 (dehydrate에서 처리되지만 명시적 보존)
+    if (data.active_slots?.[s]) {
+      const uid = data.active_slots[s]
+      if (uid && data[`${s}_active_idx`] !== undefined) {
+        update[`roster.${uid}.active_idx`] = data[`${s}_active_idx`]
+      }
+    }
   })
-  const result = checkRaidWin(entries, data.boss_current_hp ?? 0)
+  const result = checkRaidWin(entries, data.boss_current_hp ?? 0, data)
   if (result) {
     update.game_over       = true
     update.raid_result     = result
@@ -646,6 +694,8 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
   const bossName = data.boss_name ?? "보스"
   const eotLogs = []
   PLAYER_SLOTS.forEach(s => {
+    // [40인] 빈 슬롯 스킵
+    if (data.active_slots && !data.active_slots[s]) return
     const idx  = data[`${s}_active_idx`] ?? 0
     const pkmn = entries[s]?.[idx]
     if (!pkmn || pkmn.hp <= 0) return
@@ -667,7 +717,6 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
       pkmn.taunted--
       if (!pkmn.taunted) eotLogs.push(makeLog("normal", `${pkmn.name}${josa(pkmn.name, "의")} 도발이 풀렸다!`))
     }
-    // ── [추가] 유혹 턴 감소 ──────────────────────────────────────
     if ((pkmn.seducedTurns ?? 0) > 0) {
       pkmn.seducedTurns--
       if (!pkmn.seducedTurns)
@@ -722,12 +771,17 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
   if (data.weather) {
     const weatherLog = getWeatherLog(data.weather)
     if (weatherLog) eotLogs.push(makeLog("normal", weatherLog + "!"))
-    const activePokemons = PLAYER_SLOTS.map(s => ({ pokemon: entries[s]?.[data[`${s}_active_idx`] ?? 0], slot: s })).filter(e => e.pokemon && e.pokemon.hp > 0)
+    const activePokemons = PLAYER_SLOTS
+      .filter(s => !data.active_slots || data.active_slots[s])   // [40인] 빈 슬롯 제외
+      .map(s => ({ pokemon: entries[s]?.[data[`${s}_active_idx`] ?? 0], slot: s }))
+      .filter(e => e.pokemon && e.pokemon.hp > 0)
     const { msgs } = applyWeatherDamage(data.weather, activePokemons)
     msgs.forEach(m => eotLogs.push(makeLog(m.type, m.text, m.meta ?? null)))
     const { expired, weatherTurns: newTurns } = tickWeather(data.weatherTurns ?? 0)
     if (expired) {
-      const allActive = PLAYER_SLOTS.map(s => entries[s]?.[data[`${s}_active_idx`] ?? 0]).filter(Boolean)
+      const allActive = PLAYER_SLOTS
+        .filter(s => !data.active_slots || data.active_slots[s])
+        .map(s => entries[s]?.[data[`${s}_active_idx`] ?? 0]).filter(Boolean)
       const { msgs: endMsgs } = endWeather(data.weather, allActive)
       endMsgs.forEach(m => eotLogs.push(makeLog(m.type, m.text, m.meta ?? null)))
       data.weather = null; data.weatherTurns = 0
@@ -737,6 +791,7 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
   }
 
   for (const tSlot of PLAYER_SLOTS) {
+    if (data.active_slots && !data.active_slots[tSlot]) continue   // [40인] 빈 슬롯 제외
     const tIdx  = data[`${tSlot}_active_idx`] ?? 0
     const tPkmn = entries[tSlot]?.[tIdx]
     if (!tPkmn || !tPkmn.seeded || tPkmn.hp <= 0) continue
@@ -755,12 +810,11 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
     if (tPkmn.hp <= 0) eotLogs.push(makeLog("faint", `${tPkmn.name}${josa(tPkmn.name, "은는")} 쓰러졌다!`, { slot: tSlot }))
   }
 
-  // 그 위에 추가
-if ((data.boss_telekinesis ?? 0) > 0) {
-  data.boss_telekinesis--
-  if (!data.boss_telekinesis)
-    eotLogs.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 다시 땅에 내려왔다!`))
-}
+  if ((data.boss_telekinesis ?? 0) > 0) {
+    data.boss_telekinesis--
+    if (!data.boss_telekinesis)
+      eotLogs.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 다시 땅에 내려왔다!`))
+  }
 
   if ((data.boss_volatile?.cursed) && (data.boss_current_hp ?? 0) > 0) {
     const dmg = Math.max(1, Math.floor((data.boss_max_hp ?? 1) / 64))
@@ -787,9 +841,9 @@ if ((data.boss_telekinesis ?? 0) > 0) {
     }
   }
 
-  // ── 눈여아 EOT: 온도 감소 ──────────────────────────────────────
   if (data.boss_name === "눈여아") {
     PLAYER_SLOTS.forEach(s => {
+      if (data.active_slots && !data.active_slots[s]) return   // [40인] 빈 슬롯 제외
       if (data[`${s}_fireball`]) return
       const cur  = data[`${s}_temperature`] ?? 3
       const next = Math.max(0, cur - 1)
@@ -815,7 +869,8 @@ if ((data.boss_telekinesis ?? 0) > 0) {
     const batch   = db.batch()
     eotLogs.forEach((entry, i) => batch.set(logsRef.doc(), { ...entry, ts: base + i }))
     await batch.commit()
-    Object.assign(update, buildRaidEntryUpdate(entries))
+    // [40인] EOT 후 entry 저장도 roster 패치
+    Object.assign(update, buildRaidEntryUpdate(entries, data))
   }
   update.weather         = data.weather         ?? null
   update.weatherTurns    = data.weatherTurns    ?? 0
@@ -824,7 +879,8 @@ if ((data.boss_telekinesis ?? 0) > 0) {
   update.boss_current_hp = data.boss_current_hp ?? 0
   update.boss_volatile   = data.boss_volatile   ?? {}
 
-  // ← 여기
+  if (data.active_slots) update.active_slots = data.active_slots   // [40인] 보존
+
   if (data.boss_name === "눈여아") {
     PLAYER_SLOTS.forEach(s => {
       update[`${s}_temperature`] = data[`${s}_temperature`] ?? 3
@@ -832,7 +888,7 @@ if ((data.boss_telekinesis ?? 0) > 0) {
     })
   }
 
-  return checkRaidWin(entries, data.boss_current_hp ?? 0)
+  return checkRaidWin(entries, data.boss_current_hp ?? 0, data)
 }
 
 async function runBossIfNext(roomId, data, entries) {
@@ -841,6 +897,8 @@ async function runBossIfNext(roomId, data, entries) {
   if (!freshData || freshData.game_over) return null
   const order = freshData.current_order ?? []
   if (order[0] !== "boss") return null
+  // [40인] hydrate 후 deepCopy
+  if (freshData.active_slots) hydrateSlotData(freshData)
   const freshEntries = deepCopyRaidEntries2(freshData)
   return executeBossAction(roomId, freshData, freshEntries, order)
 }
@@ -860,6 +918,14 @@ export default async function handler(req, res) {
   if (!data) return res.status(404).json({ error: "방 없음" })
   if (!data.current_order || data.current_order[0] !== mySlot)
     return res.status(403).json({ error: "내 턴이 아님" })
+
+  // ── [40인] 진입 시 hydrate ────────────────────────────────────
+  if (data.active_slots) hydrateSlotData(data)
+
+  // [40인] mySlot이 active_slots에 없으면 거부
+  if (data.active_slots && !data.active_slots[mySlot]) {
+    return res.status(403).json({ error: "출전 중인 슬롯이 아님" })
+  }
 
   const bossName    = data.boss_name ?? "보스"
   const entries     = deepCopyRaidEntries(data)
@@ -903,12 +969,11 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: "감히 여왕을 건드리려고?" })
   }
 
- const targetBeedrillSlots = tSlots.filter(s => isBeedrillSlot(s))
+  const targetBeedrillSlots = tSlots.filter(s => isBeedrillSlot(s))
   const targetBossOrPlayer  = tSlots.filter(s => !isBeedrillSlot(s))
   const isBeedrillTarget    = targetBeedrillSlots.length > 0
   const isAoeToBeedrills    = isAttackMove && (moveInfo?.aoe || moveInfo?.aoeEnemy) && anyBeedrillAlive(data)
 
-  // ── [누클라바스] 2페이즈: 부위 공격 ──────────────────────────────
   const exposedPart = data.boss_state?.exposedPart ?? null
   if (
     data.boss_name === "누클라바스" &&
@@ -916,21 +981,17 @@ export default async function handler(req, res) {
     exposedPart &&
     isAttackMove
   ) {
-    // 부위가 드러나있는 동안 플레이어 공격은 무조건 해당 부위로 리다이렉트
     const partLabel  = getPartLabel(exposedPart)
     const partHp     = data.boss_state.partHp ?? { eye:500, wing:500, tail:500, claw:500 }
     const destroyed  = data.boss_state.partDestroyed ?? { eye:false, wing:false, tail:false, claw:false }
 
     if (destroyed[exposedPart]) {
-      // 이미 파괴된 부위 — 공격 무효
       logEntries.push(makeLog("normal", `${partLabel}은(는) 이미 파괴되었다!`))
     } else {
-      // 명중 체크
       const { hit } = calcHit(myPkmn, moveInfo, makeFakeBoss(data), data.weather ?? null)
       if (!hit) {
         logEntries.push(makeLog("normal", `${myPkmn.name}의 공격은 빗나갔다!`))
       } else {
-        // 공격 로그 (특수 로그 랜덤 출력)
         const HIT_LOGS = [
           `${myPkmn.name}의 ${moveData.name}! 분명히 공격이 닿았어!`,
           `${myPkmn.name}의 ${moveData.name}! 효과가 있는 것 같아!`,
@@ -939,7 +1000,6 @@ export default async function handler(req, res) {
         ]
         logEntries.push(makeLog("normal", HIT_LOGS[Math.floor(Math.random() * HIT_LOGS.length)]))
 
-        // 데미지 계산 (fakeBoss 타입 무시하고 그냥 일반 계산)
         const fakePart = {
           type:    ["노말"],
           defense: 0,
@@ -971,10 +1031,8 @@ export default async function handler(req, res) {
           newDestroyed[exposedPart] = true
           logEntries.push(makeLog("normal", `누클라바스의 ${partLabel}가 파괴되었다!`))
 
-          // 모든 부위 파괴 체크
           const allDestroyed = Object.values(newDestroyed).every(v => v)
           if (allDestroyed) {
-            // 2500 데미지
             data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - 2500)
             logEntries.push(makeLog("normal", "모든 부위가 파괴되었다! 누클라바스에게 막대한 데미지!"))
             logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
@@ -1003,7 +1061,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // 어시스트 해제
     const assistUpdate2 = {}
     if (isAssistCaster) {
       assistUpdate2.assist_active       = false
@@ -1017,7 +1074,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, ...(result2 ? { result: result2 } : {}) })
   }
 
-  // ── [누클라바스] 3페이즈: 코어 공격 ──────────────────────────────
   if (
     data.boss_name === "누클라바스" &&
     data.boss_state?.phase === 3 &&
@@ -1036,7 +1092,6 @@ export default async function handler(req, res) {
       const coreHpMap = { ...(coreState.coreHp ?? {}) }
       const curHp     = coreHpMap[currentCoreId] ?? coreData.hp ?? 300
 
-      // 명중 체크
       const fakeCoreTarget = {
         type:    coreData.type ?? ["노말"],
         defense: coreData.defense ?? 2,
@@ -1099,11 +1154,9 @@ export default async function handler(req, res) {
           let newBossState    = { ...coreState, coreHp: coreHpMap }
 
           if (newCoreHp <= 0) {
-            // 코어 파괴
             logEntries.push(makeLog("normal", getCoreDestroyLog(coreName)))
             coresDestroyed++
 
-            // 본체 700 데미지
             data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - 700)
             logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
 
@@ -1115,7 +1168,6 @@ export default async function handler(req, res) {
               logEntries.push(makeLog("normal", `누클라바스는 자세를 틀어 ${coreName}를 감춘다!`))
               logEntries.push(makeLog("normal", `${nextCoreName}가 드러났다!`))
             } else {
-              // 모든 코어 파괴 → 추가 700 데미지
               data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - 700)
               logEntries.push(makeLog("normal", "모든 코어가 파괴되었다!"))
               logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
@@ -1210,7 +1262,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, ...(result ? { result } : {}) })
   }
 
- if (myPkmn.bideState) {
+  if (myPkmn.bideState) {
     myPkmn.bideState.turnsLeft--
     if (myPkmn.bideState.turnsLeft > 0) {
       logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 참고 있다...`))
@@ -1241,7 +1293,6 @@ export default async function handler(req, res) {
         }
       }
     }
-   
     const result = await finishTurn(roomRef, roomId, data, entries, logEntries)
     return res.status(200).json({ ok: true, ...(result ? { result } : {}) })
   }
@@ -1269,7 +1320,7 @@ export default async function handler(req, res) {
         myPkmn.rollState = { active: false, turn: 0 }
       } else {
         const dmg = Math.floor(rollPower * mult)
-       if (data.boss_state?.isShedinja) {
+        if (data.boss_state?.isShedinja) {
           logEntries.push(makeLog("normal", "공격이 스쳐 지나간다... 아무것도 닿지 않는다."))
           myPkmn.rollState = rollTurn >= 3 ? { active: false, turn: 0 } : { active: true, turn: rollTurn, targetSlot: "boss" }
         } else {
@@ -1308,16 +1359,16 @@ export default async function handler(req, res) {
       if (multiplier === 0) {
         logEntries.push(makeLog("normal", `${bossName}에게는 효과가 없다…`))
       } else {
-      if (data.boss_state?.isShedinja) {
-              logEntries.push(makeLog("normal", "공격이 스쳐지나간다... 아무것도 닿지 않는다."))
-            } else {
-              data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - damage)
-              logEntries.push(makeLog("hit", "", { defender: "boss" }))
-              logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
-              if (critical) logEntries.push(makeLog("after_hit", "급소에 맞았다!"))
-              if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
-              trackDealCheck(data, mySlot, damage)
-            }
+        if (data.boss_state?.isShedinja) {
+          logEntries.push(makeLog("normal", "공격이 스쳐지나간다... 아무것도 닿지 않는다."))
+        } else {
+          data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - damage)
+          logEntries.push(makeLog("hit", "", { defender: "boss" }))
+          logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+          if (critical) logEntries.push(makeLog("after_hit", "급소에 맞았다!"))
+          if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
+          trackDealCheck(data, mySlot, damage)
+        }
       }
     }
     if (isLastTurn) {
@@ -1333,7 +1384,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, ...(result ? { result } : {}) })
   }
 
-  // ── 일반 기술 처리 ──────────────────────────────────────────────
+  // ── 일반 기술 처리 (기존 코드 전체 유지, 변경점 없음) ─────────
   const pre = checkPreActionStatus(myPkmn)
   pre.msgs.forEach(m => logEntries.push(makeLog("normal", m)))
 
@@ -1342,7 +1393,7 @@ export default async function handler(req, res) {
     conf.msgs.forEach(m => logEntries.push(makeLog("normal", m)))
 
     if (!conf.selfHit) {
-       myPkmn._prevMissed    = myPkmn.lastMoveMissed ?? false
+      myPkmn._prevMissed    = myPkmn.lastMoveMissed ?? false
       myPkmn.lastMoveMissed = false
       myPkmn.moves[moveIdx] = { ...moveData, pp: moveData.pp - 1 }
       myPkmn.lastUsedMove   = moveData.name
@@ -1367,8 +1418,9 @@ export default async function handler(req, res) {
           myPkmn.tauntSelfTurns = moveInfo.tauntSelf.turns ?? 2
           logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 적의 공격을 끌어당긴다! (${myPkmn.tauntSelfTurns}턴)`))
           specialHandled = true
-          } else if (moveInfo?.wideGuard) {
+        } else if (moveInfo?.wideGuard) {
           for (const s of PLAYER_SLOTS) {
+            if (data.active_slots && !data.active_slots[s]) continue   // [40인] 빈 슬롯 제외
             const idx  = data[`${s}_active_idx`] ?? 0
             const pkmn = entries[s]?.[idx]
             if (!pkmn || pkmn.hp <= 0) continue
@@ -1395,14 +1447,14 @@ export default async function handler(req, res) {
           myPkmn.enduring = true
           logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 버티기 태세에 들어갔다!`))
           specialHandled = true
-       } else if (moveInfo?.amulet) {
-  if (myPkmn.corrupted) {
-    logEntries.push(makeLog("normal", "부식은 제거되지 않는다! 더스트나의 오염이 깊게 스며들어 있다…"))
-  } else {
-    myPkmn.amuletTurns = 3
-    logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 신비의 부적으로 몸을 감쌌다!`))
-  }
-  specialHandled = true
+        } else if (moveInfo?.amulet) {
+          if (myPkmn.corrupted) {
+            logEntries.push(makeLog("normal", "부식은 제거되지 않는다! 더스트나의 오염이 깊게 스며들어 있다…"))
+          } else {
+            myPkmn.amuletTurns = 3
+            logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 신비의 부적으로 몸을 감쌌다!`))
+          }
+          specialHandled = true
         } else if (moveInfo?.wish) {
           myPkmn.wishTurns = 2
           logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 희망사항을 빌었다!`))
@@ -1447,6 +1499,7 @@ export default async function handler(req, res) {
           specialHandled = false
         } else if (moveInfo?.haze) {
           for (const s of PLAYER_SLOTS) {
+            if (data.active_slots && !data.active_slots[s]) continue   // [40인] 빈 슬롯 제외
             const idx  = data[`${s}_active_idx`] ?? 0
             const pkmn = entries[s]?.[idx]
             if (!pkmn || pkmn.hp <= 0) continue
@@ -1456,13 +1509,16 @@ export default async function handler(req, res) {
           logEntries.push(makeLog("normal", "모든 포켓몬의 랭크 변화가 사라졌다!"))
           specialHandled = true
         } else if (moveInfo?.effect?.weather) {
-          const allActive = PLAYER_SLOTS.map(s => entries[s]?.[data[`${s}_active_idx`] ?? 0]).filter(Boolean)
+          const allActive = PLAYER_SLOTS
+            .filter(s => !data.active_slots || data.active_slots[s])
+            .map(s => entries[s]?.[data[`${s}_active_idx`] ?? 0]).filter(Boolean)
           const { msgs, weather: newW, weatherTurns: newT } = startWeather(moveInfo.effect.weather, moveInfo.effect.weatherTurns ?? 5, data.weather ?? null, allActive)
           data.weather = newW; data.weatherTurns = newT
           msgs.forEach(m => logEntries.push(makeLog("normal", m)))
           specialHandled = true
         } else if (moveInfo?.lightScreen) {
           PLAYER_SLOTS.forEach(s => {
+            if (data.active_slots && !data.active_slots[s]) return   // [40인] 빈 슬롯 제외
             const idx  = data[`${s}_active_idx`] ?? 0
             const pkmn = entries[s]?.[idx]
             if (!pkmn || pkmn.hp <= 0) return
@@ -1541,46 +1597,46 @@ export default async function handler(req, res) {
             }
           }
           specialHandled = true
-       } else if (moveInfo?.telekinesis) {
-  const allyTargets = tSlots.filter(s => PLAYER_SLOTS.includes(s) && s !== mySlot)
-  const isBossTarget = tSlots.includes("boss")
-  if (allyTargets.length === 0 && !isBossTarget) {
-    logEntries.push(makeLog("normal", "대상이 없다!"))
-  } else {
-    if (isBossTarget) {
-      data.boss_telekinesis = 3
-      logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 텔레키네시스로 떠올랐다! (3턴간 모든 공격 명중)`))
-    }
-    for (const ts of allyTargets) {
-      const tIdx  = data[`${ts}_active_idx`] ?? 0
-      const tPkmn = entries[ts]?.[tIdx]
-      if (!tPkmn || tPkmn.hp <= 0) { logEntries.push(makeLog("normal", "대상이 쓰러져 있다!")); continue }
-      tPkmn.telekinesis = 3
-      logEntries.push(makeLog("normal", `${tPkmn.name}${josa(tPkmn.name, "은는")} 텔레키네시스로 떠올랐다! (3턴간 모든 공격 명중)`))
-    }
-  }
-  specialHandled = true
-          } else if (moveInfo?.counter) {
-  const lastDmg = myPkmn.last_damage_taken ?? 0
-  if (lastDmg <= 0) {
-    logEntries.push(makeLog("normal", "돌려줄 데미지가 없다!"))
-  } else {
-    const counterDmg = Math.max(1, Math.floor(lastDmg * 1.2))
-    if (anyBeedrillAlive(data)) {
-      ;(data.Beedrill ?? []).forEach((bee, i) => {
-        if (bee.hp <= 0) return
-        applyDamageToBeedrill(data, `beedrill_${i}`, counterDmg, logEntries)
-      })
-    } else {
-      data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - counterDmg)
-      logEntries.push(makeLog("hit", "", { defender: "boss" }))
-      logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
-      logEntries.push(makeLog("after_hit", `${counterDmg} 데미지를 돌려줬다!`))
-      if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
-      trackDealCheck(data, mySlot, counterDmg)
-    }
-  }
-  specialHandled = true
+        } else if (moveInfo?.telekinesis) {
+          const allyTargets = tSlots.filter(s => PLAYER_SLOTS.includes(s) && s !== mySlot)
+          const isBossTarget = tSlots.includes("boss")
+          if (allyTargets.length === 0 && !isBossTarget) {
+            logEntries.push(makeLog("normal", "대상이 없다!"))
+          } else {
+            if (isBossTarget) {
+              data.boss_telekinesis = 3
+              logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 텔레키네시스로 떠올랐다! (3턴간 모든 공격 명중)`))
+            }
+            for (const ts of allyTargets) {
+              const tIdx  = data[`${ts}_active_idx`] ?? 0
+              const tPkmn = entries[ts]?.[tIdx]
+              if (!tPkmn || tPkmn.hp <= 0) { logEntries.push(makeLog("normal", "대상이 쓰러져 있다!")); continue }
+              tPkmn.telekinesis = 3
+              logEntries.push(makeLog("normal", `${tPkmn.name}${josa(tPkmn.name, "은는")} 텔레키네시스로 떠올랐다! (3턴간 모든 공격 명중)`))
+            }
+          }
+          specialHandled = true
+        } else if (moveInfo?.counter) {
+          const lastDmg = myPkmn.last_damage_taken ?? 0
+          if (lastDmg <= 0) {
+            logEntries.push(makeLog("normal", "돌려줄 데미지가 없다!"))
+          } else {
+            const counterDmg = Math.max(1, Math.floor(lastDmg * 1.2))
+            if (anyBeedrillAlive(data)) {
+              ;(data.Beedrill ?? []).forEach((bee, i) => {
+                if (bee.hp <= 0) return
+                applyDamageToBeedrill(data, `beedrill_${i}`, counterDmg, logEntries)
+              })
+            } else {
+              data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - counterDmg)
+              logEntries.push(makeLog("hit", "", { defender: "boss" }))
+              logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+              logEntries.push(makeLog("after_hit", `${counterDmg} 데미지를 돌려줬다!`))
+              if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
+              trackDealCheck(data, mySlot, counterDmg)
+            }
+          }
+          specialHandled = true
         } else if (moveInfo?.splash) {
           logEntries.push(makeLog("normal", "그러나 아무 일도 일어나지 않았다!"))
           specialHandled = true
@@ -1589,6 +1645,7 @@ export default async function handler(req, res) {
             logEntries.push(makeLog("normal", "회복이 봉인돼 있어서 실패했다!"))
           } else if (moveInfo?.waterHeal) {
             for (const s of PLAYER_SLOTS) {
+              if (data.active_slots && !data.active_slots[s]) continue   // [40인] 빈 슬롯 제외
               const idx  = data[`${s}_active_idx`] ?? 0
               const pkmn = entries[s]?.[idx]
               if (!pkmn || pkmn.hp <= 0) continue
@@ -1611,9 +1668,9 @@ export default async function handler(req, res) {
             if (moveInfo?.effect?.removeFlying) {
               const types = Array.isArray(myPkmn.type) ? myPkmn.type : [myPkmn.type]
               if (types.includes("비행")) {
-               myPkmn._origType = myPkmn.type
-myPkmn.type = types.filter(t => t !== "비행")
-myPkmn.roostTurns = 2
+                myPkmn._origType = myPkmn.type
+                myPkmn.type = types.filter(t => t !== "비행")
+                myPkmn.roostTurns = 2
                 logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "의")} 비행 타입이 사라졌다!`))
               }
             }
@@ -1635,11 +1692,11 @@ myPkmn.roostTurns = 2
             data.boss_status = fakeBoss.status
           }
           if (moveInfo?.targetSelf === false && (fakeBoss.confusion ?? 0) > 0) {
-  data.boss_volatile = {
-    ...(data.boss_volatile ?? {}),
-    confused: fakeBoss.confusion
-  }
-}
+            data.boss_volatile = {
+              ...(data.boss_volatile ?? {}),
+              confused: fakeBoss.confusion
+            }
+          }
         }
 
       } else {
@@ -1722,7 +1779,6 @@ myPkmn.roostTurns = 2
               if (isAssistCaster) logEntries.push(makeLog("after_hit", "어시스트 효과로 위력이 올라갔다!"))
               if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
               trackDealCheck(data, mySlot, finalDmg)
-           
             }
           }
         } else {
@@ -1736,7 +1792,7 @@ myPkmn.roostTurns = 2
                 if (isAssistCaster && dmgDealt > 0) {
                   const bee = getBeedrill(data, bSlot)
                   if (bee && bee.hp > 0) {
-                    const supporters = PLAYER_SLOTS.filter(s => s !== mySlot)
+                    const supporters = PLAYER_SLOTS.filter(s => s !== mySlot && (!data.active_slots || data.active_slots[s]))
                     for (const supSlot of supporters) {
                       const supIdx  = data[`${supSlot}_active_idx`] ?? 0
                       const supPkmn = entries[supSlot]?.[supIdx]
@@ -1757,7 +1813,8 @@ myPkmn.roostTurns = 2
               if (canSwitch) {
                 await writeLogs(roomId, logEntries)
                 await roomRef.update({
-                  ...buildRaidEntryUpdate(entries),
+                  ...buildRaidEntryUpdate(entries, data),
+                  ...(data.active_slots ? { active_slots: data.active_slots } : {}),
                   boss_current_hp: data.boss_current_hp,
                   Beedrill:        data.Beedrill ?? [],
                   current_order:   [mySlot, ...(data.current_order ?? []).slice(1)],
@@ -1808,7 +1865,15 @@ myPkmn.roostTurns = 2
                       const canSwitch = (entries[mySlot] ?? []).some((p, i) => i !== myActiveIdx && p.hp > 0)
                       if (canSwitch) {
                         await writeLogs(roomId, logEntries)
-                        await roomRef.update({ ...buildRaidEntryUpdate(entries), boss_current_hp: data.boss_current_hp, Beedrill: data.Beedrill ?? [], current_order: [mySlot, ...(data.current_order ?? []).slice(1)], turn_count: data.turn_count ?? 1, turn_started_at: data.turn_started_at, [`force_switch_${mySlot}`]: true, weather: data.weather ?? null, weatherTurns: data.weatherTurns ?? 0, ...(data.boss_baby !== undefined ? { boss_baby: data.boss_baby } : {}) })
+                        await roomRef.update({
+                          ...buildRaidEntryUpdate(entries, data),
+                          ...(data.active_slots ? { active_slots: data.active_slots } : {}),
+                          boss_current_hp: data.boss_current_hp, Beedrill: data.Beedrill ?? [],
+                          current_order: [mySlot, ...(data.current_order ?? []).slice(1)],
+                          turn_count: data.turn_count ?? 1, turn_started_at: data.turn_started_at,
+                          [`force_switch_${mySlot}`]: true, weather: data.weather ?? null, weatherTurns: data.weatherTurns ?? 0,
+                          ...(data.boss_baby !== undefined ? { boss_baby: data.boss_baby } : {})
+                        })
                         return res.status(200).json({ ok: true })
                       }
                     }
@@ -1818,248 +1883,249 @@ myPkmn.roostTurns = 2
 
             } else {
 
-            // ── 보스 대상 ───────────────────────────────────────
-            if (moveInfo?.counter) {
-              const lastDmg = myPkmn.last_damage_taken ?? 0
-              if (lastDmg <= 0) {
-                logEntries.push(makeLog("normal", "돌려줄 데미지가 없다!"))
-              } else {
-                const counterDmg = Math.max(1, Math.floor(lastDmg * 1.2))
-                if (anyBeedrillAlive(data)) {
-                  ;(data.Beedrill ?? []).forEach((bee, i) => {
-                    if (bee.hp <= 0) return
-                    applyDamageToBeedrill(data, `beedrill_${i}`, counterDmg, logEntries)
-                  })
+              // ── 보스 대상 ───────────────────────────────────────
+              if (moveInfo?.counter) {
+                const lastDmg = myPkmn.last_damage_taken ?? 0
+                if (lastDmg <= 0) {
+                  logEntries.push(makeLog("normal", "돌려줄 데미지가 없다!"))
                 } else {
-                 if (data.boss_state?.isShedinja) {
-                    logEntries.push(makeLog("normal", "공격이 스쳐지나간다... 아무것도 닿지 않는다."))
+                  const counterDmg = Math.max(1, Math.floor(lastDmg * 1.2))
+                  if (anyBeedrillAlive(data)) {
+                    ;(data.Beedrill ?? []).forEach((bee, i) => {
+                      if (bee.hp <= 0) return
+                      applyDamageToBeedrill(data, `beedrill_${i}`, counterDmg, logEntries)
+                    })
                   } else {
-                    data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - counterDmg)
-                    logEntries.push(makeLog("hit", "", { defender: "boss" }))
-                    logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
-                    logEntries.push(makeLog("after_hit", `${counterDmg} 데미지를 돌려줬다!`))
-                    if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
-                    trackDealCheck(data, mySlot, counterDmg)
+                    if (data.boss_state?.isShedinja) {
+                      logEntries.push(makeLog("normal", "공격이 스쳐지나간다... 아무것도 닿지 않는다."))
+                    } else {
+                      data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - counterDmg)
+                      logEntries.push(makeLog("hit", "", { defender: "boss" }))
+                      logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+                      logEntries.push(makeLog("after_hit", `${counterDmg} 데미지를 돌려줬다!`))
+                      if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
+                      trackDealCheck(data, mySlot, counterDmg)
+                    }
                   }
                 }
-              }
-            } else {
-              const effectiveMoveInfo = patchMoveForWeather(data.weather ?? null, moveData.name, moveInfo)
-              const { hit, hitType }  = calcHit(myPkmn, effectiveMoveInfo, fakeBoss, data.weather ?? null)
-              if (!hit) {
-                logEntries.push(makeLog("normal", hitType === "evaded" ? `${bossName}${josa(bossName, "이가")} 피했다!` : `${myPkmn.name}의 공격은 빗나갔다!`))
-                myPkmn.lastMoveMissed = true
-                if (moveInfo?.jumpKick) {
-                  const selfDmg = Math.max(1, Math.floor((myPkmn.maxHp ?? myPkmn.hp) * 0.25))
-                  myPkmn.hp = Math.max(0, myPkmn.hp - selfDmg)
-                  logEntries.push(makeLog("hp", `${myPkmn.name}${josa(myPkmn.name, "은는")} 반동으로 ${selfDmg} 데미지를 입었다!`, { slot: mySlot, hp: myPkmn.hp, maxHp: myPkmn.maxHp }))
-                  if (myPkmn.hp <= 0) logEntries.push(makeLog("faint", `${myPkmn.name}${josa(myPkmn.name, "은는")} 쓰러졌다!`, { slot: mySlot }))
-                }
               } else {
-                if (moveInfo?.breakBarrier && (data.boss_lightScreen ?? 0) > 0) {
-                  data.boss_lightScreen = 0
-                  logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "의")} 빛의장막이 부서졌다!`))
-                }
-                if (moveInfo?.breakBarrier && (data.boss_reflectorTurns ?? 0) > 0) {
-  data.boss_reflectorTurns = 0
-  logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "의")} 리플렉터가 부서졌다!`))
-}
-
-                const powerOverride   = calcPowerOverride(moveInfo, myPkmn, fakeBoss)
-                const atkStatOverride = calcAtkStatOverride(moveInfo, myPkmn)
-                const { damage, multiplier, critical, dice, minRoll, minDice } = calcDamage(myPkmn, moveData.name, fakeBoss, powerOverride, atkStatOverride, null, data.weather ?? null)
-                logEntries.push(makeLog("dice", "", { slot: mySlot, roll: dice }))
-
-                if (multiplier === 0) {
-                  logEntries.push(makeLog("normal", `${bossName}에게는 효과가 없다…`))
+                const effectiveMoveInfo = patchMoveForWeather(data.weather ?? null, moveData.name, moveInfo)
+                const { hit, hitType }  = calcHit(myPkmn, effectiveMoveInfo, fakeBoss, data.weather ?? null)
+                if (!hit) {
+                  logEntries.push(makeLog("normal", hitType === "evaded" ? `${bossName}${josa(bossName, "이가")} 피했다!` : `${myPkmn.name}의 공격은 빗나갔다!`))
+                  myPkmn.lastMoveMissed = true
+                  if (moveInfo?.jumpKick) {
+                    const selfDmg = Math.max(1, Math.floor((myPkmn.maxHp ?? myPkmn.hp) * 0.25))
+                    myPkmn.hp = Math.max(0, myPkmn.hp - selfDmg)
+                    logEntries.push(makeLog("hp", `${myPkmn.name}${josa(myPkmn.name, "은는")} 반동으로 ${selfDmg} 데미지를 입었다!`, { slot: mySlot, hp: myPkmn.hp, maxHp: myPkmn.maxHp }))
+                    if (myPkmn.hp <= 0) logEntries.push(makeLog("faint", `${myPkmn.name}${josa(myPkmn.name, "은는")} 쓰러졌다!`, { slot: mySlot }))
+                  }
                 } else {
-                  // ── 속임수: 낙인 대상이 보스 공격 시 아군이 대신 맞음 ──
-                  const trickery = checkTrickeryRedirect(mySlot, "boss", data, entries)
-                  if (trickery.redirected) {
-                    const friendlyIdx  = data[`${trickery.friendlySlot}_active_idx`] ?? 0
-                    const friendlyPkmn = entries[trickery.friendlySlot]?.[friendlyIdx]
-                    if (friendlyPkmn && friendlyPkmn.hp > 0) {
-                      const redirectDmg = Math.max(1, Math.floor(damage * 0.70))
-                      logEntries.push(makeLog("normal", `속임수! ${friendlyPkmn.name}${josa(friendlyPkmn.name, "이가")} 대신 맞았다! (${redirectDmg} 데미지)`))
-                      if (friendlyPkmn.enduring && redirectDmg >= friendlyPkmn.hp) {
-                        friendlyPkmn.hp = 1; friendlyPkmn.enduring = false
-                        logEntries.push(makeLog("after_hit", `${friendlyPkmn.name}${josa(friendlyPkmn.name, "은는")} 버텼다!`))
-                      } else {
-                        friendlyPkmn.hp = Math.max(0, friendlyPkmn.hp - redirectDmg)
+                  if (moveInfo?.breakBarrier && (data.boss_lightScreen ?? 0) > 0) {
+                    data.boss_lightScreen = 0
+                    logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "의")} 빛의장막이 부서졌다!`))
+                  }
+                  if (moveInfo?.breakBarrier && (data.boss_reflectorTurns ?? 0) > 0) {
+                    data.boss_reflectorTurns = 0
+                    logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "의")} 리플렉터가 부서졌다!`))
+                  }
+
+                  const powerOverride   = calcPowerOverride(moveInfo, myPkmn, fakeBoss)
+                  const atkStatOverride = calcAtkStatOverride(moveInfo, myPkmn)
+                  const { damage, multiplier, critical, dice, minRoll, minDice } = calcDamage(myPkmn, moveData.name, fakeBoss, powerOverride, atkStatOverride, null, data.weather ?? null)
+                  logEntries.push(makeLog("dice", "", { slot: mySlot, roll: dice }))
+
+                  if (multiplier === 0) {
+                    logEntries.push(makeLog("normal", `${bossName}에게는 효과가 없다…`))
+                  } else {
+                    const trickery = checkTrickeryRedirect(mySlot, "boss", data, entries)
+                    if (trickery.redirected) {
+                      const friendlyIdx  = data[`${trickery.friendlySlot}_active_idx`] ?? 0
+                      const friendlyPkmn = entries[trickery.friendlySlot]?.[friendlyIdx]
+                      if (friendlyPkmn && friendlyPkmn.hp > 0) {
+                        const redirectDmg = Math.max(1, Math.floor(damage * 0.70))
+                        logEntries.push(makeLog("normal", `속임수! ${friendlyPkmn.name}${josa(friendlyPkmn.name, "이가")} 대신 맞았다! (${redirectDmg} 데미지)`))
+                        if (friendlyPkmn.enduring && redirectDmg >= friendlyPkmn.hp) {
+                          friendlyPkmn.hp = 1; friendlyPkmn.enduring = false
+                          logEntries.push(makeLog("after_hit", `${friendlyPkmn.name}${josa(friendlyPkmn.name, "은는")} 버텼다!`))
+                        } else {
+                          friendlyPkmn.hp = Math.max(0, friendlyPkmn.hp - redirectDmg)
+                        }
+                        logEntries.push(makeLog("hit", "", { defender: trickery.friendlySlot }))
+                        logEntries.push(makeLog("hp",  "", { slot: trickery.friendlySlot, hp: friendlyPkmn.hp, maxHp: friendlyPkmn.maxHp }))
+                        if (friendlyPkmn.hp <= 0) logEntries.push(makeLog("faint", `${friendlyPkmn.name}${josa(friendlyPkmn.name, "은는")} 쓰러졌다!`, { slot: trickery.friendlySlot }))
+                        const result = await finishTurn(roomRef, roomId, data, entries, logEntries)
+                        return res.status(200).json({ ok: true, ...(result ? { result } : {}) })
                       }
-                      logEntries.push(makeLog("hit", "", { defender: trickery.friendlySlot }))
-                      logEntries.push(makeLog("hp",  "", { slot: trickery.friendlySlot, hp: friendlyPkmn.hp, maxHp: friendlyPkmn.maxHp }))
-                      if (friendlyPkmn.hp <= 0) logEntries.push(makeLog("faint", `${friendlyPkmn.name}${josa(friendlyPkmn.name, "은는")} 쓰러졌다!`, { slot: trickery.friendlySlot }))
-                      // 보스는 피해 안 받음 → finishTurn으로 바로 이동
-                      const result = await finishTurn(roomRef, roomId, data, entries, logEntries)
-                      return res.status(200).json({ ok: true, ...(result ? { result } : {}) })
                     }
-                  }
-                  myPkmn.lastMoveMissed = false
-                  let finalDmg = damage
-                  if (isAssistCaster) finalDmg = Math.floor(finalDmg * 1.15)
+                    myPkmn.lastMoveMissed = false
+                    let finalDmg = damage
+                    if (isAssistCaster) finalDmg = Math.floor(finalDmg * 1.15)
 
-                  const chargedMult = (myPkmn.charged && moveInfo?.type === "전기") ? 1.2 : 1.0
-                  myPkmn.charged = false
-                  if (chargedMult > 1) { finalDmg = Math.floor(finalDmg * chargedMult); logEntries.push(makeLog("after_hit", "충전된 전기로 위력이 올라갔다!")) }
+                    const chargedMult = (myPkmn.charged && moveInfo?.type === "전기") ? 1.2 : 1.0
+                    myPkmn.charged = false
+                    if (chargedMult > 1) { finalDmg = Math.floor(finalDmg * chargedMult); logEntries.push(makeLog("after_hit", "충전된 전기로 위력이 올라갔다!")) }
 
-                  if (moveInfo?.trickster) {
-                    const bossAtk = data.boss_attack ?? 5
-                    const myAtk   = getBaseStat(myPkmn, "atk")
-                    finalDmg = Math.floor(finalDmg * (bossAtk / myAtk) * 0.7)
-                  }
-
-                  finalDmg = applyDmgMultipliers(finalDmg, moveInfo, moveData.name, myPkmn, data.boss_status ?? null, data.boss_current_hp ?? 0, data.boss_max_hp ?? 1, logEntries)
-                  finalDmg = Math.max(1, finalDmg)
-                if (data.boss_name === "누클라바스" && (data.boss_state?.phase ?? 1) === 1) {
-                    // 1페이즈: 플레이어 딜은 무조건 10 고정으로 누적
-                    const fixedDmg = 10
-                    data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - fixedDmg)
-                    logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
-                    data.boss_state = {
-                      ...(data.boss_state ?? {}),
-                      totalDmgTaken: (data.boss_state?.totalDmgTaken ?? 0) + fixedDmg,
+                    if (moveInfo?.trickster) {
+                      const bossAtk = data.boss_attack ?? 5
+                      const myAtk   = getBaseStat(myPkmn, "atk")
+                      finalDmg = Math.floor(finalDmg * (bossAtk / myAtk) * 0.7)
                     }
-                  } else if (data.boss_state?.isShedinja) {
-                    logEntries.push(makeLog("normal", "공격이 스쳐 지나간다... 아무것도 닿지 않는다."))
-                  } else {
-                    data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - finalDmg)
-                    trackDealCheck(data, mySlot, finalDmg)
 
-                    // ── [누클라바스] 4페이즈 딜 누적 ──────────────
-                    if (data.boss_name === "누클라바스" && (data.boss_state?.phase ?? 1) === 4) {
+                    finalDmg = applyDmgMultipliers(finalDmg, moveInfo, moveData.name, myPkmn, data.boss_status ?? null, data.boss_current_hp ?? 0, data.boss_max_hp ?? 1, logEntries)
+                    finalDmg = Math.max(1, finalDmg)
+
+                    if (data.boss_name === "누클라바스" && (data.boss_state?.phase ?? 1) === 1) {
+                      const fixedDmg = 10
+                      data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - fixedDmg)
+                      logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
                       data.boss_state = {
                         ...(data.boss_state ?? {}),
-                        phase4TotalDmg: (data.boss_state?.phase4TotalDmg ?? 0) + finalDmg,
+                        totalDmgTaken: (data.boss_state?.totalDmgTaken ?? 0) + fixedDmg,
                       }
-                      // 딜 윈도우 기록 (전기 코어 2라운드 딜 체크)
-                      if (data.boss_state?.phase4DmgWindowOn) {
-                        const win = { ...(data.boss_state.phase4DmgWindow ?? {}) }
-                        win[mySlot] = (win[mySlot] ?? 0) + finalDmg
-                        data.boss_state = { ...data.boss_state, phase4DmgWindow: win }
-                      }
-                    }
+                    } else if (data.boss_state?.isShedinja) {
+                      logEntries.push(makeLog("normal", "공격이 스쳐 지나간다... 아무것도 닿지 않는다."))
+                    } else {
+                      data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - finalDmg)
+                      trackDealCheck(data, mySlot, finalDmg)
 
-                    // ── [누클라바스] 비극 피해 공유 ──────────────
-                    if (data.boss_name === "누클라바스") {
-                      const tragedySlot = PLAYER_SLOTS.find(s => data[`${s}_tragedy`])
-                      if (tragedySlot) {
-                        const tIdx  = data[`${tragedySlot}_active_idx`] ?? 0
-                        const tPkmn = entries[tragedySlot]?.[tIdx]
-                        if (tPkmn && tPkmn.hp > 0) {
-                          const sharedDmg = Math.max(1, Math.floor(finalDmg * 0.5))
-                          if (tPkmn.enduring && sharedDmg >= tPkmn.hp) {
-                            tPkmn.hp = 1; tPkmn.enduring = false
-                            logEntries.push(makeLog("after_hit", `${tPkmn.name}은(는) 버텼다!`))
-                          } else {
-                            tPkmn.hp = Math.max(0, tPkmn.hp - sharedDmg)
+                      if (data.boss_name === "누클라바스" && (data.boss_state?.phase ?? 1) === 4) {
+                        data.boss_state = {
+                          ...(data.boss_state ?? {}),
+                          phase4TotalDmg: (data.boss_state?.phase4TotalDmg ?? 0) + finalDmg,
+                        }
+                        if (data.boss_state?.phase4DmgWindowOn) {
+                          const win = { ...(data.boss_state.phase4DmgWindow ?? {}) }
+                          win[mySlot] = (win[mySlot] ?? 0) + finalDmg
+                          data.boss_state = { ...data.boss_state, phase4DmgWindow: win }
+                        }
+                      }
+
+                      if (data.boss_name === "누클라바스") {
+                        const tragedySlot = PLAYER_SLOTS.find(s => data[`${s}_tragedy`])
+                        if (tragedySlot) {
+                          const tIdx  = data[`${tragedySlot}_active_idx`] ?? 0
+                          const tPkmn = entries[tragedySlot]?.[tIdx]
+                          if (tPkmn && tPkmn.hp > 0) {
+                            const sharedDmg = Math.max(1, Math.floor(finalDmg * 0.5))
+                            if (tPkmn.enduring && sharedDmg >= tPkmn.hp) {
+                              tPkmn.hp = 1; tPkmn.enduring = false
+                              logEntries.push(makeLog("after_hit", `${tPkmn.name}은(는) 버텼다!`))
+                            } else {
+                              tPkmn.hp = Math.max(0, tPkmn.hp - sharedDmg)
+                            }
+                            tPkmn.tookDamageLastTurn = true
+                            logEntries.push(makeLog("normal", `[비극]으로 ${tPkmn.name}에게도 피해가 공유되었다! (${sharedDmg})`))
+                            logEntries.push(makeLog("hit", "", { defender: tragedySlot }))
+                            logEntries.push(makeLog("hp",  "", { slot: tragedySlot, hp: tPkmn.hp, maxHp: tPkmn.maxHp }))
+                            if (tPkmn.hp <= 0) logEntries.push(makeLog("faint", `${tPkmn.name}은(는) 쓰러졌다!`, { slot: tragedySlot }))
                           }
-                          tPkmn.tookDamageLastTurn = true
-                          logEntries.push(makeLog("normal", `[비극]으로 ${tPkmn.name}에게도 피해가 공유되었다! (${sharedDmg})`))
-                          logEntries.push(makeLog("hit", "", { defender: tragedySlot }))
-                          logEntries.push(makeLog("hp",  "", { slot: tragedySlot, hp: tPkmn.hp, maxHp: tPkmn.maxHp }))
-                          if (tPkmn.hp <= 0) logEntries.push(makeLog("faint", `${tPkmn.name}은(는) 쓰러졌다!`, { slot: tragedySlot }))
                         }
                       }
                     }
-                  }
-                  
-                  recordZoroarkHit(mySlot, finalDmg, data)
-                  // ── 마폭시 예언 추적 ──────────────────────────
-                  trackProphecyData(mySlot, moveData.name, !!(moveInfo?.power > 0), finalDmg, data)
 
-                  // 더스트나 분노 체크
-                  if (data.boss_state?.corruptionExploded && finalDmg > 0) {
-                    logEntries.push(makeLog("normal", "더스트나가 분노했다!"))
-                    data.boss_state = { ...data.boss_state, corruptionExploded: false }
-                  }
+                    recordZoroarkHit(mySlot, finalDmg, data)
+                    trackProphecyData(mySlot, moveData.name, !!(moveInfo?.power > 0), finalDmg, data)
 
-                  logEntries.push(makeLog("hit", "", { defender: "boss" }))
-                  logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
-                  if (multiplier > 1) logEntries.push(makeLog("after_hit", "효과가 굉장했다!"))
-                  if (multiplier < 1) logEntries.push(makeLog("after_hit", "효과가 별로인 듯하다…"))
-                  if (minRoll)        logEntries.push(makeLog("after_hit", `${minDice}! (최소 피해 보장)`))
-                  else if (critical)  logEntries.push(makeLog("after_hit", "급소에 맞았다!"))
-                  if (isAssistCaster) logEntries.push(makeLog("after_hit", "어시스트 효과로 위력이 올라갔다!"))
-                  if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
+                    if (data.boss_state?.corruptionExploded && finalDmg > 0) {
+                      logEntries.push(makeLog("normal", "더스트나가 분노했다!"))
+                      data.boss_state = { ...data.boss_state, corruptionExploded: false }
+                    }
 
-                  if (moveInfo?.clearSmog && finalDmg > 0) {
-                    data.boss_rank = defaultRanks()
-                    logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "의")} 랭크 변화가 사라졌다!`))
-                  }
-                  if (moveInfo?.enchantedVoice && finalDmg > 0) {
-                    const bRank = data.boss_rank ?? defaultRanks()
-                    const boosted = (bRank.atkTurns ?? 0) > 0 || (bRank.defTurns ?? 0) > 0 || (bRank.spdTurns ?? 0) > 0
-                    if (boosted) {
-                      data.boss_volatile = { ...(data.boss_volatile ?? {}), confused: (Math.floor(Math.random() * 3) + 1) }
-                      logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 혼란에 빠졌다!`))
+                    logEntries.push(makeLog("hit", "", { defender: "boss" }))
+                    logEntries.push(makeLog("hp",  "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+                    if (multiplier > 1) logEntries.push(makeLog("after_hit", "효과가 굉장했다!"))
+                    if (multiplier < 1) logEntries.push(makeLog("after_hit", "효과가 별로인 듯하다…"))
+                    if (minRoll)        logEntries.push(makeLog("after_hit", `${minDice}! (최소 피해 보장)`))
+                    else if (critical)  logEntries.push(makeLog("after_hit", "급소에 맞았다!"))
+                    if (isAssistCaster) logEntries.push(makeLog("after_hit", "어시스트 효과로 위력이 올라갔다!"))
+                    if (data.boss_current_hp <= 0) logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" }))
+
+                    if (moveInfo?.clearSmog && finalDmg > 0) {
+                      data.boss_rank = defaultRanks()
+                      logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "의")} 랭크 변화가 사라졌다!`))
                     }
-                  }
-                  if (isAssistCaster && finalDmg > 0 && data.boss_current_hp > 0) {
-                    const supporters = PLAYER_SLOTS.filter(s => s !== mySlot)
-                    for (const supSlot of supporters) {
-                      const supIdx  = data[`${supSlot}_active_idx`] ?? 0
-                      const supPkmn = entries[supSlot]?.[supIdx]
-                      if (!supPkmn || supPkmn.hp <= 0) continue
-                      const bonusDmg = Math.max(1, Math.floor(finalDmg * 0.3))
-                      data.boss_current_hp = Math.max(0, data.boss_current_hp - bonusDmg)
-                      trackDealCheck(data, supSlot, bonusDmg)
-                      logEntries.push(makeLog("assist", ""))
-                      logEntries.push(makeLog("hit",       "", { defender: "boss" }))
-                      logEntries.push(makeLog("hp",        "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
-                      logEntries.push(makeLog("after_hit", `${supPkmn.name}${josa(supPkmn.name, "이가")} 추가 공격했다! (${bonusDmg} 데미지)`))
-                      if (data.boss_current_hp <= 0) { logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" })); break }
+                    if (moveInfo?.enchantedVoice && finalDmg > 0) {
+                      const bRank = data.boss_rank ?? defaultRanks()
+                      const boosted = (bRank.atkTurns ?? 0) > 0 || (bRank.defTurns ?? 0) > 0 || (bRank.spdTurns ?? 0) > 0
+                      if (boosted) {
+                        data.boss_volatile = { ...(data.boss_volatile ?? {}), confused: (Math.floor(Math.random() * 3) + 1) }
+                        logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 혼란에 빠졌다!`))
+                      }
                     }
-                  }
-                  if (moveInfo?.effect?.drain && finalDmg > 0) {
-                    const heal = Math.max(1, Math.floor(finalDmg * moveInfo.effect.drain))
-                    myPkmn.hp  = Math.min(myPkmn.maxHp ?? myPkmn.hp, myPkmn.hp + heal)
-                    logEntries.push(makeLog("hp", `${myPkmn.name}${josa(myPkmn.name, "은는")} 체력을 흡수했다! (+${heal})`, { slot: mySlot, hp: myPkmn.hp, maxHp: myPkmn.maxHp }))
-                  }
-                  if (moveInfo?.effect?.recoil && finalDmg > 0) {
-                    const recoil = Math.max(1, Math.floor(finalDmg * moveInfo.effect.recoil))
-                    myPkmn.hp = Math.max(0, myPkmn.hp - recoil)
-                    logEntries.push(makeLog("hp", `${myPkmn.name}${josa(myPkmn.name, "은는")} 반동으로 ${recoil} 데미지를 입었다!`, { slot: mySlot, hp: myPkmn.hp, maxHp: myPkmn.maxHp }))
-                    if (myPkmn.hp <= 0) logEntries.push(makeLog("faint", `${myPkmn.name}${josa(myPkmn.name, "은는")} 쓰러졌다!`, { slot: mySlot }))
-                  }
-                  if (moveInfo?.rank && moveInfo?.targetSelf === true && finalDmg > 0) {
-                    applyRankChanges({ atk: moveInfo.rank.atk, def: moveInfo.rank.def, spd: moveInfo.rank.spd, turns: moveInfo.rank.turns, chance: moveInfo.rank.chance }, myPkmn, myPkmn, moveData.name, logEntries)
-                  }
-                  if (moveInfo?.jealousFlame && finalDmg > 0) {
-                    const bRank = data.boss_rank ?? defaultRanks()
-                    const wasBoosted = (bRank.atkTurns ?? 0) > 0 || (bRank.defTurns ?? 0) > 0 || (bRank.spdTurns ?? 0) > 0
-                    if (wasBoosted && !data.boss_status) { data.boss_status = "화상"; logEntries.push(makeLog("normal", `질투의불꽃으로 ${bossName}${josa(bossName, "이가")} 화상을 입었다!`)) }
-                  }
-                  if (moveInfo?.bubbleAria && finalDmg > 0) {
-                    if (data.boss_status === "화상") { data.boss_status = null; logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "의")} 화상이 나았다!`)) }
-                    for (const s of PLAYER_SLOTS) {
-                      const idx  = data[`${s}_active_idx`] ?? 0
-                      const pkmn = entries[s]?.[idx]
-                      if (!pkmn || pkmn.hp <= 0) continue
-                      if (pkmn.status === "화상") { pkmn.status = null; logEntries.push(makeLog("normal", `${pkmn.name}${josa(pkmn.name, "의")} 화상이 나았다!`)) }
+                    if (isAssistCaster && finalDmg > 0 && data.boss_current_hp > 0) {
+                      const supporters = PLAYER_SLOTS.filter(s => s !== mySlot && (!data.active_slots || data.active_slots[s]))
+                      for (const supSlot of supporters) {
+                        const supIdx  = data[`${supSlot}_active_idx`] ?? 0
+                        const supPkmn = entries[supSlot]?.[supIdx]
+                        if (!supPkmn || supPkmn.hp <= 0) continue
+                        const bonusDmg = Math.max(1, Math.floor(finalDmg * 0.3))
+                        data.boss_current_hp = Math.max(0, data.boss_current_hp - bonusDmg)
+                        trackDealCheck(data, supSlot, bonusDmg)
+                        logEntries.push(makeLog("assist", ""))
+                        logEntries.push(makeLog("hit",       "", { defender: "boss" }))
+                        logEntries.push(makeLog("hp",        "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+                        logEntries.push(makeLog("after_hit", `${supPkmn.name}${josa(supPkmn.name, "이가")} 추가 공격했다! (${bonusDmg} 데미지)`))
+                        if (data.boss_current_hp <= 0) { logEntries.push(makeLog("faint", `${bossName}${josa(bossName, "은는")} 쓰러졌다!`, { slot: "boss" })); break }
+                      }
                     }
-                  }
-                  applyMoveEffect({ ...moveInfo?.effect, drain: 0, recoil: 0 }, myPkmn, fakeBoss, finalDmg).forEach(m => {
-                    if (m.includes("상태")) data.boss_status = moveInfo.effect?.status ?? null
-                    logEntries.push(makeLog("normal", m))
-                  })
-                  data.boss_rank = fakeBoss.ranks ?? data.boss_rank
-                  if (moveInfo?.hyperBeam) myPkmn.hyperBeamState = true
-                  if (moveInfo?.uTurn) {
-                    const canSwitch = (entries[mySlot] ?? []).some((p, i) => i !== myActiveIdx && p.hp > 0)
-                    if (canSwitch) {
-                      await writeLogs(roomId, logEntries)
-                      await roomRef.update({ ...buildRaidEntryUpdate(entries), boss_current_hp: data.boss_current_hp, Beedrill: data.Beedrill ?? [], current_order: [mySlot, ...(data.current_order ?? []).slice(1)], turn_count: data.turn_count ?? 1, turn_started_at: data.turn_started_at, [`force_switch_${mySlot}`]: true })
-                      return res.status(200).json({ ok: true })
+                    if (moveInfo?.effect?.drain && finalDmg > 0) {
+                      const heal = Math.max(1, Math.floor(finalDmg * moveInfo.effect.drain))
+                      myPkmn.hp  = Math.min(myPkmn.maxHp ?? myPkmn.hp, myPkmn.hp + heal)
+                      logEntries.push(makeLog("hp", `${myPkmn.name}${josa(myPkmn.name, "은는")} 체력을 흡수했다! (+${heal})`, { slot: mySlot, hp: myPkmn.hp, maxHp: myPkmn.maxHp }))
                     }
-                  }
-                  if (data.boss_current_hp > 0) {
-                    applyAoeFriendlyFire(myPkmn, mySlot, moveData.name, entries, data, logEntries)
-                    applyAoeToBaby(myPkmn, mySlot, moveData.name, moveInfo, data, entries, logEntries, { isAssistCaster })
+                    if (moveInfo?.effect?.recoil && finalDmg > 0) {
+                      const recoil = Math.max(1, Math.floor(finalDmg * moveInfo.effect.recoil))
+                      myPkmn.hp = Math.max(0, myPkmn.hp - recoil)
+                      logEntries.push(makeLog("hp", `${myPkmn.name}${josa(myPkmn.name, "은는")} 반동으로 ${recoil} 데미지를 입었다!`, { slot: mySlot, hp: myPkmn.hp, maxHp: myPkmn.maxHp }))
+                      if (myPkmn.hp <= 0) logEntries.push(makeLog("faint", `${myPkmn.name}${josa(myPkmn.name, "은는")} 쓰러졌다!`, { slot: mySlot }))
+                    }
+                    if (moveInfo?.rank && moveInfo?.targetSelf === true && finalDmg > 0) {
+                      applyRankChanges({ atk: moveInfo.rank.atk, def: moveInfo.rank.def, spd: moveInfo.rank.spd, turns: moveInfo.rank.turns, chance: moveInfo.rank.chance }, myPkmn, myPkmn, moveData.name, logEntries)
+                    }
+                    if (moveInfo?.jealousFlame && finalDmg > 0) {
+                      const bRank = data.boss_rank ?? defaultRanks()
+                      const wasBoosted = (bRank.atkTurns ?? 0) > 0 || (bRank.defTurns ?? 0) > 0 || (bRank.spdTurns ?? 0) > 0
+                      if (wasBoosted && !data.boss_status) { data.boss_status = "화상"; logEntries.push(makeLog("normal", `질투의불꽃으로 ${bossName}${josa(bossName, "이가")} 화상을 입었다!`)) }
+                    }
+                    if (moveInfo?.bubbleAria && finalDmg > 0) {
+                      if (data.boss_status === "화상") { data.boss_status = null; logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "의")} 화상이 나았다!`)) }
+                      for (const s of PLAYER_SLOTS) {
+                        if (data.active_slots && !data.active_slots[s]) continue
+                        const idx  = data[`${s}_active_idx`] ?? 0
+                        const pkmn = entries[s]?.[idx]
+                        if (!pkmn || pkmn.hp <= 0) continue
+                        if (pkmn.status === "화상") { pkmn.status = null; logEntries.push(makeLog("normal", `${pkmn.name}${josa(pkmn.name, "의")} 화상이 나았다!`)) }
+                      }
+                    }
+                    applyMoveEffect({ ...moveInfo?.effect, drain: 0, recoil: 0 }, myPkmn, fakeBoss, finalDmg).forEach(m => {
+                      if (m.includes("상태")) data.boss_status = moveInfo.effect?.status ?? null
+                      logEntries.push(makeLog("normal", m))
+                    })
+                    data.boss_rank = fakeBoss.ranks ?? data.boss_rank
+                    if (moveInfo?.hyperBeam) myPkmn.hyperBeamState = true
+                    if (moveInfo?.uTurn) {
+                      const canSwitch = (entries[mySlot] ?? []).some((p, i) => i !== myActiveIdx && p.hp > 0)
+                      if (canSwitch) {
+                        await writeLogs(roomId, logEntries)
+                        await roomRef.update({
+                          ...buildRaidEntryUpdate(entries, data),
+                          ...(data.active_slots ? { active_slots: data.active_slots } : {}),
+                          boss_current_hp: data.boss_current_hp, Beedrill: data.Beedrill ?? [],
+                          current_order: [mySlot, ...(data.current_order ?? []).slice(1)],
+                          turn_count: data.turn_count ?? 1, turn_started_at: data.turn_started_at,
+                          [`force_switch_${mySlot}`]: true
+                        })
+                        return res.status(200).json({ ok: true })
+                      }
+                    }
+                    if (data.boss_current_hp > 0) {
+                      applyAoeFriendlyFire(myPkmn, mySlot, moveData.name, entries, data, logEntries)
+                      applyAoeToBaby(myPkmn, mySlot, moveData.name, moveInfo, data, entries, logEntries, { isAssistCaster })
+                    }
                   }
                 }
               }
-            }
             }
           }
         }
@@ -2078,7 +2144,8 @@ myPkmn.roostTurns = 2
   const isEot    = newOrder.length === 0
 
   const update = {
-    ...buildRaidEntryUpdate(entries),
+    ...buildRaidEntryUpdate(entries, data),   // [40인] data 전달
+    ...(data.active_slots ? { active_slots: data.active_slots } : {}),   // [40인] 보존
     boss_current_hp: data.boss_current_hp ?? 0,
     boss_rank:       data.boss_rank       ?? defaultRanks(),
     boss_status:     data.boss_status     ?? null,
@@ -2105,16 +2172,22 @@ myPkmn.roostTurns = 2
     boss_lastHitSlot:        data.boss_lastHitSlot        ?? null,
     boss_prophecyLastMoves:  data.boss_prophecyLastMoves  ?? {},
     _phase3Entered:          data._phase3Entered          ?? false,
-    boss_telekinesis: data.boss_telekinesis ?? 0, 
+    boss_telekinesis: data.boss_telekinesis ?? 0,
     ...(data.boss_baby !== undefined ? { boss_baby: data.boss_baby } : {}),
   }
   PLAYER_SLOTS.forEach(s => {
     if (data[`${s}_active_idx`] !== undefined) update[`${s}_active_idx`] = data[`${s}_active_idx`]
     if (data[`${s}_last_move`]  !== undefined) update[`${s}_last_move`]  = data[`${s}_last_move`]
     update[`${s}_total_damage`] = data[`${s}_total_damage`] ?? 0
+    // [40인] roster에 active_idx 반영
+    if (data.active_slots?.[s]) {
+      const uid = data.active_slots[s]
+      if (uid && data[`${s}_active_idx`] !== undefined) {
+        update[`roster.${uid}.active_idx`] = data[`${s}_active_idx`]
+      }
+    }
   })
 
-// ── [칼라마네로] 현혹 기록 ─────────────────────────────────────
   if (data.boss_name === "칼라마네로") {
     const malamarUpdate = recordMalamarMove(mySlot, moveData.name, data, entries)
     if (malamarUpdate?.boss_state) {
@@ -2122,10 +2195,7 @@ myPkmn.roostTurns = 2
       update.boss_state = malamarUpdate.boss_state
     }
   }
-  // ───────────────────────────────────────────────────────────────
 
-
-// ── 닌자스크 3페이즈 전환 (victory 판정 전에 가로채기) ──────────
   if (isNinjaskPhase3Trigger(data)) {
     const snap2 = await db.collection("boss").doc("ninjask").get()
     const shed  = (snap2.data() ?? {}).shedinja ?? {}
@@ -2146,7 +2216,7 @@ myPkmn.roostTurns = 2
   if (assistEventTs !== null) update.assist_event = { ts: assistEventTs }
   if (syncEventTs   !== null) update.sync_event   = { ts: syncEventTs }
 
-  const earlyResult = checkRaidWin(entries, data.boss_current_hp ?? 0)
+  const earlyResult = checkRaidWin(entries, data.boss_current_hp ?? 0, data)
 
   if (earlyResult) {
     update.game_over = true; update.raid_result = earlyResult; update.current_order = []; update.turn_started_at = null

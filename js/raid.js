@@ -13,6 +13,49 @@ const API = "https://sonnetpc.vercel.app/api"
 
 const SFX_DICE = "https://slippery-copper-mzpmcmc2ra.edgeone.app/soundreality-bicycle-bell-155622.mp3"
 const SFX_BTN  = "https://usual-salmon-mnqxptwyvw.edgeone.app/Pokemon%20(A%20Button)%20-%20Sound%20Effect%20(HD)%20(1)%20(1).mp3"
+// ── BGM ──────────────────────────────────────────────────────────────
+const BGM_URLS = {
+  1: "https://added-blush-ab2rk5nplp.edgeone.app/Edge%20of%20War%20Trailer%20Music%20-%20Cinematic%20IA%20Brasil.mp3",
+  2: "https://confidential-crimson-iadnxol3mz.edgeone.app/PerituneMaterial_Dramatic5.mp3",
+  3: "https://colourful-harlequin-7dtqfctl65.edgeone.app/unleash-.mp3",
+  4: "https://ok-tomato-1tclxjrhed.edgeone.app/逆転.mp3",
+}
+let bgmAudio        = null
+let currentBgmPhase = 0
+
+function playBgm(phase) {
+  const url = BGM_URLS[phase]
+  if (!url || currentBgmPhase === phase) return
+  currentBgmPhase = phase
+
+  // 기존 브금 페이드 아웃
+  if (bgmAudio) {
+    const old = bgmAudio
+    bgmAudio  = null
+    const iv  = setInterval(() => {
+      if (old.volume > 0.06) { old.volume = Math.max(0, old.volume - 0.06) }
+      else { clearInterval(iv); old.pause(); old.src = "" }
+    }, 80)
+  }
+
+  const audio  = new Audio(url)
+  audio.loop   = true
+  audio.volume = 0
+  bgmAudio     = audio
+
+  audio.play().then(() => {
+    const getTarget = () => {
+      const slider = document.getElementById("bgm-volume")
+      return slider ? parseFloat(slider.value) : 0.7
+    }
+    const iv = setInterval(() => {
+      if (!bgmAudio || bgmAudio !== audio) { clearInterval(iv); return }
+      const target = getTarget()
+      if (audio.volume < target - 0.04) audio.volume = Math.min(target, audio.volume + 0.04)
+      else { audio.volume = target; clearInterval(iv) }
+    }, 80)
+  }).catch(() => {})
+}
 
 function playSound(url) {
   const a = new Audio(url); a.volume = 0.6; a.play().catch(() => {})
@@ -47,10 +90,16 @@ const _attackMirage   = (data) => callApi("raidAttackMirage",  data)
 const _standChoice    = (data) => callApi("raidStandChoice",   data)
 const _resonanceAgree = (data) => callApi("raidResonance",     { ...data, action: "agree" })
 const _resonanceFire  = (data) => callApi("raidResonance",     { ...data, action: "fire"  })
+// ── [40인] Admin 슬롯 교체 API ──────────────────────────────────────
+const _adminSwapSlot  = (data) => callApi("raidAdminSwap",    data)
+
 const roomRef = doc(db, "raid", ROOM_ID)
 const logsRef = collection(db, "raid", ROOM_ID, "logs")
 
 let mySlot = null, myUid = null
+// ── [40인] 내 roster 상태: "active" | "bench" | "spectator" | null
+let myRosterStatus = null
+
 let myTurn = false, actionDone = false, gameOver = false
 let renderedLogIds = new Set()
 let isSpectator    = new URLSearchParams(location.search).get("spectator") === "true"
@@ -60,7 +109,6 @@ let isProcessing    = false
 let pendingRoomData = null
 let currentRoomData = null
 
-// 독침붕 타겟 선택 상태
 let pendingMoveIdx     = -1
 let pendingMoveInfo    = null
 let beedrillTargetMode = false
@@ -74,7 +122,7 @@ const TYPE_COLORS = {
 }
 
 let lastTurnSlot = null
-let mirageSelectMode = false   // ← 추가
+let mirageSelectMode = false
 const PLAYER_SLOTS = ["p1", "p2", "p3"]
 
 function $(id) { return document.getElementById(id) }
@@ -90,8 +138,11 @@ function anyBeedrillAlive(data) {
   return (data.Beedrill ?? []).some(b => b.hp > 0)
 }
 
+// ── [40인] active_slots에서 실제 출전 중인 슬롯만 체크
 function isAllPlayersDead(data) {
+  const slots = data.active_slots ?? {}
   return PLAYER_SLOTS.every(s => {
+    if (!slots[s]) return true  // 빈 슬롯은 dead로 취급
     const entry = data[`${s}_entry`] ?? []
     return entry.every(p => p.hp <= 0)
   })
@@ -113,6 +164,31 @@ function slotToPrefix(slot) {
   if (slot === mySlot) return "my"
   const others = otherPlayerSlots()
   return slot === others[0] ? "ally1" : "ally2"
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  [40인] mySlot 결정
+//  active_slots에서 myUid를 찾아 p1/p2/p3 반환
+//  없으면 roster에서 status 확인 → bench/spectator
+// ════════════════════════════════════════════════════════════════════
+function resolveMySlotAndStatus(data, uid) {
+  // 1. active_slots에서 찾기
+  const activeSlots = data.active_slots ?? {}
+  for (const [slot, slotUid] of Object.entries(activeSlots)) {
+    if (slotUid === uid) return { slot, status: "active" }
+  }
+
+  // 2. roster에서 찾기
+  const member = (data.roster ?? {})[uid]
+  if (member) return { slot: null, status: member.status ?? "spectator" }
+
+  // 3. 레거시: player_uid 필드 (이전 구조 호환)
+  for (const s of PLAYER_SLOTS) {
+    const slotKey = s.replace("p", "player")
+    if (data[`${slotKey}_uid`] === uid) return { slot: s, status: "active" }
+  }
+
+  return { slot: null, status: "spectator" }
 }
 
 // ── HP바 / 포트레이트 ────────────────────────────────────────────────
@@ -144,8 +220,23 @@ function updatePortrait(prefix, pokemon) {
 
 // ── 플레이어 슬롯 UI ─────────────────────────────────────────────────
 function updateSlotUI(slot, data) {
+  // [40인] active_slots에 없는 슬롯은 빈 슬롯으로 표시
+  const activeSlots = data.active_slots ?? {}
+  const isSlotEmpty = Object.keys(activeSlots).length > 0 && !activeSlots[slot]
+
   const prefix = slotToPrefix(slot)
   if (!prefix) return
+
+  if (isSlotEmpty) {
+    // 빈 슬롯 — UI를 "대기 중" 상태로 표시
+    const nameLabel = $(`${prefix}-name-label`)
+    if (nameLabel) nameLabel.innerText = "대기 중"
+    const nameEl = $(`${prefix}-active-name`)
+    if (nameEl) nameEl.innerText = "-"
+    updateHpBar(`${prefix}-hp-bar`, `${prefix}-active-hp`, 0, 1, false)
+    return
+  }
+
   const activeIdx = data[`${slot}_active_idx`] ?? 0
   const pokemon   = data[`${slot}_entry`]?.[activeIdx]
   if (!pokemon) return
@@ -165,10 +256,9 @@ function updateSlotUI(slot, data) {
     nameEl.innerText   = (pokemon.name ?? "???") + statusTag + confusionTag + flyTag + digTag + grudgeTag
   }
 
- updateHpBar(`${prefix}-hp-bar`, `${prefix}-active-hp`, pokemon.hp, pokemon.maxHp, prefix === "my")
+  updateHpBar(`${prefix}-hp-bar`, `${prefix}-active-hp`, pokemon.hp, pokemon.maxHp, prefix === "my")
   updatePortrait(prefix, pokemon)
 
-  // ── 누클라바스 4페이즈 상태 뱃지 ──────────────────────────────
   if (currentRoomData?.boss_name === "누클라바스") {
     const BADGES = [
       { key: `${slot}_ominous`,  id: `${prefix}-badge-ominous`,  label: "🔴 흉조",  color: "#c0392b" },
@@ -203,19 +293,18 @@ function updateSlotUI(slot, data) {
 
 // ── 보스 UI ──────────────────────────────────────────────────────────
 function updateBossUI(data) {
+  
   const bossHp    = data.boss_current_hp ?? 0
   const bossMaxHp = data.boss_max_hp ?? 1
   const bossName  = data.boss_name       ?? "보스"
 
-  // ── 일루전 분기 ──────────────────────────────────────────────
   const illusionActive  = data.boss_state?.illusionActive  ?? false
   const displayHp       = illusionActive && data.boss_state?.illusionHp != null
                           ? data.boss_state.illusionHp : bossHp
   const displayName     = illusionActive && data.boss_state?.illusionName
                           ? data.boss_state.illusionName : bossName
- const displayPortrait = illusionActive && data.boss_state?.illusionPortrait
+  const displayPortrait = illusionActive && data.boss_state?.illusionPortrait
     ? data.boss_state.illusionPortrait : (data.boss_portrait ?? data.boss_portrait_url ?? null)
-  // ─────────────────────────────────────────────────────────────
 
   const nameEl = $("boss-name")
   if (nameEl) nameEl.innerText = displayName
@@ -260,7 +349,6 @@ function updateBossUI(data) {
   updateBabyBossUI(data)
 }
 
-// ── 아기 캥카 UI ──────────────────────────────────────────────────────
 function updateBabyBossUI(data) {
   const baby    = data.boss_baby ?? null
   const bossRow = $("boss-row")
@@ -309,7 +397,6 @@ function updateBabyBossUI(data) {
   }
 }
 
-// ── 아기 캥카 HP 애니메이션 ──────────────────────────────────────────
 function animateBabyHpBar(targetHp, maxHp) {
   return new Promise(resolve => {
     const hpBar = $("baby-hp-bar")
@@ -325,7 +412,6 @@ function animateBabyHpBar(targetHp, maxHp) {
   })
 }
 
-// ── 독침붕 UI ────────────────────────────────────────────────────────
 function updateBeedrillUI(data) {
   const beedrills = data.Beedrill ?? []
   const row       = $("beedrill-row")
@@ -368,7 +454,6 @@ function updateBeedrillUI(data) {
   })
 }
 
-// ── 독침붕 타겟 선택 모드 ────────────────────────────────────────────
 function enterBeedrillTargetMode(data) {
   beedrillTargetMode = true
   const hint = $("beedrill-target-hint")
@@ -405,7 +490,6 @@ function exitBeedrillTargetMode(data) {
   pendingMoveInfo = null
 }
 
-// ── 자동 행동 ────────────────────────────────────────────────────────
 function triggerAutoAction(data) {
   if (actionDone || !myTurn || isSpectator) return
   const myActiveIdx = data[`${mySlot}_active_idx`] ?? 0
@@ -441,6 +525,8 @@ function triggerAutoAction(data) {
 
   if (moveInfo.helper) {
     const aliveAllies = otherPlayerSlots().filter(s => {
+      // [40인] 빈 슬롯 제외
+      if ((data.active_slots ?? {})[s] === undefined) return false
       const aIdx = data[`${s}_active_idx`] ?? 0
       const p    = data[`${s}_entry`]?.[aIdx]
       return p && p.hp > 0
@@ -464,7 +550,7 @@ function triggerAutoAction(data) {
   doUseMove(moveIdx, needsTarget ? ["boss"] : [], data)
 }
 
-// ── 로그 처리 ────────────────────────────────────────────────────────
+// ── 로그 처리 (변경 없음) ─────────────────────────────────────────────
 async function handleLogEntry(entry) {
   const { type, text, meta } = entry
   const logEl = $("battle-log")
@@ -528,10 +614,10 @@ async function handleLogEntry(entry) {
         if (!prefix) break
         const showNum = prefix === "my" || prefix === "boss"
         if (prefix === "boss" && currentRoomData?.boss_state?.illusionActive) {
-    // 아무것도 안 함 (일루전 HP 유지)
-  } else {
-    await animateHpBar(prefix, meta.hp, meta.maxHp, showNum)
-  }
+          // 일루전 HP 유지
+        } else {
+          await animateHpBar(prefix, meta.hp, meta.maxHp, showNum)
+        }
         if (text) await typeText(logEl, text)
       }
       await wait(100)
@@ -542,7 +628,7 @@ async function handleLogEntry(entry) {
       await wait(200)
       break
     }
-   case "beedrill_hp": {
+    case "beedrill_hp": {
       if (meta?.beedrills) {
         meta.beedrills.forEach((bee, i) => {
           const hpBar = $(`beedrill-hp-bar-${i}`)
@@ -560,7 +646,6 @@ async function handleLogEntry(entry) {
       break
     }
     case "part_hp": {
-      // 누클라바스 부위 HP 업데이트
       if (meta?.part) {
         const bar = $(`part-hp-bar-${meta.part}`)
         const num = $(`part-hp-num-${meta.part}`)
@@ -581,7 +666,6 @@ async function handleLogEntry(entry) {
       break
     }
     case "core_hp": {
-      // 누클라바스 코어 HP 업데이트
       if (meta?.coreId) {
         const bar = $("core-hp-bar")
         const num = $("core-hp-num")
@@ -614,14 +698,12 @@ async function handleLogEntry(entry) {
       if (entry.text) await showTauntText(entry.text)
       break
     }
-    // ── 조로아크 일루전 ──────────────────────────────────────────
     case "zoroark_illusion": {
       if (meta) activateIllusionUI(meta)
       await wait(400)
       break
     }
     case "stand_choice": {
-      // 막아선다/물러난다 선택 팝업 — 탱커 슬롯 본인에게만 표시
       if (meta?.tankSlot && meta.tankSlot === mySlot && !isSpectator) {
         showStandChoicePopup(meta.tankSlot, currentRoomData)
       }
@@ -629,7 +711,6 @@ async function handleLogEntry(entry) {
       break
     }
     case "catastro_resonance_modal": {
-      // 레조넌스 모달 — 전원에게 표시
       showResonanceModal(currentRoomData)
       await wait(400)
       break
@@ -715,7 +796,7 @@ async function processLogQueue() {
   setTimeout(processLogQueue, 50)
 }
 
-// ── 애니메이션 ───────────────────────────────────────────────────────
+// ── 애니메이션 (변경 없음) ───────────────────────────────────────────
 function animateHpBar(prefix, targetHp, maxHp, showNum) {
   return new Promise(resolve => {
     const bar = $(`${prefix}-hp-bar`)
@@ -863,16 +944,13 @@ function showUmbreonAnimation() {
   })
 }
 
-// ── 마폭시 예언 / 대사 애니메이션 ──────────────────────────────────
 function showProphecyText(text) {
   return new Promise(resolve => {
     const el = $("prophecy-anim")
     if (!el) { resolve(); return }
-
     const isShort = text.length <= 40
     const cls     = isShort ? "prophecy-show-short" : "prophecy-show"
     const dur     = isShort ? 2800 : 4500
-
     el.textContent = text
     el.classList.remove("prophecy-show", "prophecy-show-short")
     void el.offsetWidth
@@ -884,7 +962,6 @@ function showProphecyText(text) {
   })
 }
 
-// ── 조로아크 도발 텍스트 (5초간 상단 표시) ──────────────────────────
 function showTauntText(text) {
   return new Promise(resolve => {
     let el = $("taunt-anim")
@@ -922,7 +999,6 @@ function showTauntText(text) {
   })
 }
 
-// ── 누클라바스 막아선다/물러난다 팝업 ─────────────────────────────
 function showStandChoicePopup(tankSlot, data) {
   const existing = document.getElementById("stand-choice-popup")
   if (existing) existing.remove()
@@ -940,7 +1016,6 @@ function showStandChoicePopup(tankSlot, data) {
     box-shadow: 0 0 40px rgba(83,92,168,0.5);
     min-width: 240px; text-align: center;
   `
-
   const title = document.createElement("div")
   title.style.cssText = "font-size: 15px; font-weight: bold; color: #a0aaff; letter-spacing: 0.05em;"
   title.textContent   = "⚠ 선택하라!"
@@ -988,7 +1063,6 @@ function showStandChoicePopup(tankSlot, data) {
   popup.appendChild(btnWrap)
   document.body.appendChild(popup)
 
-  // 30초 후 자동 물러난다
   setTimeout(() => {
     if (document.getElementById("stand-choice-popup")) {
       popup.remove()
@@ -997,7 +1071,6 @@ function showStandChoicePopup(tankSlot, data) {
   }, 30000)
 }
 
-// ── 누클라바스 레조넌스 모달 ──────────────────────────────────────
 function showResonanceModal(data) {
   const existing = document.getElementById("resonance-modal")
   if (existing) existing.remove()
@@ -1020,7 +1093,6 @@ function showResonanceModal(data) {
   `
   title.textContent = "RESONANCE"
 
-  // CSS 애니메이션 주입
   if (!document.getElementById("resonance-style")) {
     const style = document.createElement("style")
     style.id = "resonance-style"
@@ -1047,8 +1119,8 @@ function showResonanceModal(data) {
   const btnWrap = document.createElement("div")
   btnWrap.style.cssText = "display: flex; flex-direction: column; gap: 10px; align-items: center;"
 
-  // 동의 버튼 (관전자 제외, 아직 동의 안 한 경우)
-  if (!isSpectator && myUid) {
+  // [40인] 출전 중인 플레이어만 동의 가능
+  if (!isSpectator && mySlot && myRosterStatus === "active" && myUid) {
     const alreadyAgreed = (data.resonance_agreed ?? []).includes(myUid)
     const agreeBtn = document.createElement("button")
     agreeBtn.id = "resonance-agree-btn"
@@ -1071,8 +1143,6 @@ function showResonanceModal(data) {
     btnWrap.appendChild(agreeBtn)
   }
 
-  // 어드민 발동 버튼 (role: admin인 경우에만 표시)
-  // — 실제 어드민 여부는 서버에서 검증하지만 UI는 미리 표시
   const adminFireBtn = document.createElement("button")
   adminFireBtn.id = "resonance-fire-btn"
   adminFireBtn.textContent = "⚡ 레조넌스 발동"
@@ -1105,7 +1175,6 @@ function showResonanceModal(data) {
   document.body.appendChild(modal)
 }
 
-// ── 레조넌스 모달 업데이트 (roomData 변경 시) ─────────────────────
 function updateResonanceModal(data) {
   const modal = document.getElementById("resonance-modal")
   if (!modal) return
@@ -1128,16 +1197,11 @@ function updateResonanceModal(data) {
     if (data.resonance_ready) fireBtn.textContent = "⚡ 레조넌스 발동"
   }
 
-  // 게임 오버(victory)면 모달 닫기
-  if (data.game_over) {
-    modal.remove()
-  }
+  if (data.game_over) modal.remove()
 }
 
-// ── 조로아크 일루전 UI ───────────────────────────────────────────
 function activateIllusionUI(meta) {
   const { illusionHp, illusionMaxHp, illusionName, illusionPortrait } = meta
-
   const bossHpBar  = $("boss-hp-bar")
   const bossHpText = $("boss-hp-text")
   if (bossHpBar && illusionMaxHp > 0) {
@@ -1208,6 +1272,9 @@ function deactivateIllusionUI(data) {
 
 // ── 기술 버튼 ────────────────────────────────────────────────────────
 function updateMoveButtons(data) {
+  // [40인] bench 플레이어는 버튼 전체 비활성화
+  const isBenchPlayer = myRosterStatus === "bench"
+
   const myActiveIdx = data[`${mySlot}_active_idx`] ?? 0
   const myPokemon   = data[`${mySlot}_entry`]?.[myActiveIdx]
   const fainted     = !myPokemon || myPokemon.hp <= 0
@@ -1226,6 +1293,13 @@ function updateMoveButtons(data) {
   for (let i = 0; i < 4; i++) {
     const btn = $(`move-btn-${i}`)
     if (!btn) continue
+
+    // bench 플레이어는 모든 버튼 비활성화
+    if (isBenchPlayer) {
+      btn.innerHTML = '<span style="font-size:11px;color:#aaa">대기 중</span>'
+      btn.disabled = true; btn.onclick = null; continue
+    }
+
     if (i >= movesArr.length) {
       btn.innerHTML = '<span style="font-size:13px">-</span>'
       btn.disabled = true; btn.onclick = null; continue
@@ -1280,6 +1354,7 @@ function onMoveClick(idx, moveInfo, data) {
 
   if (moveInfo?.healPulse) {
     const aliveAllies = otherPlayerSlots().filter(s => {
+      if (!(data.active_slots ?? {})[s]) return false  // [40인] 빈 슬롯 제외
       const aIdx = data[`${s}_active_idx`] ?? 0
       const p    = data[`${s}_entry`]?.[aIdx]
       return p && p.hp > 0
@@ -1306,6 +1381,7 @@ function onMoveClick(idx, moveInfo, data) {
 
   if (moveInfo?.eggHeal) {
     const aliveAllies = otherPlayerSlots().filter(s => {
+      if (!(data.active_slots ?? {})[s]) return false
       const aIdx = data[`${s}_active_idx`] ?? 0
       const p    = data[`${s}_entry`]?.[aIdx]
       return p && p.hp > 0
@@ -1337,6 +1413,7 @@ function onMoveClick(idx, moveInfo, data) {
 
   if (moveInfo?.pollenPuff) {
     const aliveAllies = otherPlayerSlots().filter(s => {
+      if (!(data.active_slots ?? {})[s]) return false
       const aIdx = data[`${s}_active_idx`] ?? 0
       const p    = data[`${s}_entry`]?.[aIdx]
       return p && p.hp > 0
@@ -1383,6 +1460,7 @@ function onMoveClick(idx, moveInfo, data) {
 
   if (moveInfo?.helper) {
     const aliveAllies = otherPlayerSlots().filter(s => {
+      if (!(data.active_slots ?? {})[s]) return false
       const aIdx = data[`${s}_active_idx`] ?? 0
       const p    = data[`${s}_entry`]?.[aIdx]
       return p && p.hp > 0
@@ -1461,7 +1539,7 @@ function onMoveClick(idx, moveInfo, data) {
     || moveInfo?.roar || moveInfo?.leechSeed || moveInfo?.chainBind
     || moveInfo?.dragonTail || moveInfo?.poisonPowder
     || moveInfo?.curse
-    || moveInfo?.telekinesis 
+    || moveInfo?.telekinesis
     || (moveInfo?.effect?.volatile && !moveInfo?.targetSelf)
     || (moveInfo?.effect?.status && moveInfo?.targetSelf === false))
 
@@ -1494,7 +1572,6 @@ function onMoveClick(idx, moveInfo, data) {
   doUseMove(idx, ["boss"], data)
 }
 
-// ── 보스 타겟 선택 팝업 ──────────────────────────────────────────────
 function showBossTargetPopup(idx, moveInfo, data) {
   const existing = document.getElementById('boss-target-popup')
   if (existing) existing.remove()
@@ -1554,7 +1631,6 @@ async function doUseMove(moveIdx, targetSlots, data) {
   }
 }
 
-// ── 아이템 사용 ──────────────────────────────────────────────────────
 async function doUseItem(itemName, targetIdx, data) {
   if (actionDone) return
   actionDone = true
@@ -1570,12 +1646,12 @@ async function doUseItem(itemName, targetIdx, data) {
   }
 }
 
-// ── 가방 버튼 ────────────────────────────────────────────────────────
 function updateBagButton(data) {
   const btn = $("bag-btn")
   if (!btn) return
   updateBagBadge("bag-btn", data.inventory ?? {})
-  if (isSpectator || gameOver) { btn.disabled = true; return }
+  // [40인] bench 플레이어는 가방 사용 불가
+  if (isSpectator || gameOver || myRosterStatus === "bench") { btn.disabled = true; return }
   const myActiveIdx  = data[`${mySlot}_active_idx`] ?? 0
   const myActivePkmn = data[`${mySlot}_entry`]?.[myActiveIdx]
   const hasAliveInParty = (data[`${mySlot}_entry`] ?? []).some(p => p.hp > 0)
@@ -1592,11 +1668,12 @@ function updateBagButton(data) {
     : () => closeItemModal()
 }
 
-// ── 교체 버튼 ────────────────────────────────────────────────────────
 function updateBenchButtons(data) {
   const bench = $("bench-container")
   if (!bench) return
   bench.innerHTML = ""
+  // [40인] bench 플레이어는 교체 불가
+  if (myRosterStatus === "bench") return
   const myEntry      = data[`${mySlot}_entry`] ?? []
   const activeIdx    = data[`${mySlot}_active_idx`] ?? 0
   const myActivePkmn = myEntry[activeIdx]
@@ -1645,7 +1722,6 @@ async function doSwitchPokemon(newIdx, data, forceSwitch = false) {
   }
 }
 
-// ── 턴 순서 표시 ─────────────────────────────────────────────────────
 function updateOrderDisplay(data) {
   const el = $("order-display")
   if (!el) return
@@ -1667,6 +1743,14 @@ function updateTurnUI(data) {
   const el = $("turn-display")
   if (!el) return
   const order = data.current_order ?? []
+
+  // [40인] bench 플레이어 → "대기 중" 표시
+  if (myRosterStatus === "bench") {
+    el.innerText = "📋 대기 중 (교체 대기)"
+    el.style.color = "#888"
+    return
+  }
+
   if (isSpectator) {
     if (order.length > 0) {
       const s     = order[0]
@@ -1698,7 +1782,6 @@ function updateTurnUI(data) {
   if (tc) tc.innerText = `${data.round_count ?? 0}라운드 / ${data.turn_count ?? 0}턴`
 }
 
-// ── 어시스트 UI ──────────────────────────────────────────────────────
 function updateAssistUI(data) {
   const assist  = data.assist_active  ?? null
   const used    = data.assist_used    ?? false
@@ -1709,7 +1792,8 @@ function updateAssistUI(data) {
   const reqBtn = $("assist-request-btn")
   if (reqBtn) {
     const isMyReq = req?.from === mySlot
-    if (isSpectator || used || assist || allDead || blocked) {
+    // [40인] bench 플레이어는 어시스트 불가
+    if (isSpectator || used || assist || allDead || blocked || myRosterStatus === "bench") {
       reqBtn.disabled  = true
       reqBtn.innerText = allDead ? "사용 불가" : assist ? "🤝 어시스트 중" : used ? "지원 완료" : "요청 불가"
     } else if (isMyReq) {
@@ -1731,6 +1815,7 @@ function updateAssistUI(data) {
     const canAgree     = req && req.from !== mySlot
                       && !(req.agrees ?? []).includes(mySlot)
                       && !isSpectator && !myFainted
+                      && myRosterStatus === "active"   // [40인] 출전 중만
     if (canAgree) {
       popup.style.display = "block"
       const nameEl = $("assist-popup-name")
@@ -1744,7 +1829,6 @@ function updateAssistUI(data) {
   }
 }
 
-// ── 싱크로나이즈 UI ──────────────────────────────────────────────────
 function updateSyncUI(data) {
   const sync    = data.sync_active  ?? null
   const used    = data.sync_used    ?? false
@@ -1755,7 +1839,8 @@ function updateSyncUI(data) {
   const reqBtn = $("sync-request-btn")
   if (reqBtn) {
     const isMyReq = req?.from === mySlot
-    if (isSpectator || used || sync || allDead || blocked) {
+    // [40인] bench 플레이어는 싱크로 불가
+    if (isSpectator || used || sync || allDead || blocked || myRosterStatus === "bench") {
       reqBtn.disabled  = true
       reqBtn.innerText = allDead ? "사용 불가" : sync ? "💠 싱크로 중" : used ? "동기화 완료" : "요청 불가"
     } else if (isMyReq) {
@@ -1788,6 +1873,7 @@ function updateSyncUI(data) {
     const canAgree     = req && req.from !== mySlot
                       && !(req.agrees ?? []).includes(mySlot)
                       && !isSpectator && !myFainted
+                      && myRosterStatus === "active"   // [40인] 출전 중만
     if (canAgree) {
       popup.style.display = "block"
       const nameEl = $("sync-popup-name")
@@ -1798,14 +1884,13 @@ function updateSyncUI(data) {
   }
 }
 
-// ── 게임 오버 ────────────────────────────────────────────────────────
 function showGameOver(data) {
   if (gameOver) return
   gameOver = true
   closeItemModal()
   const win = data.raid_result === "victory"
   const td  = $("turn-display")
-  if (isSpectator) {
+  if (isSpectator || myRosterStatus === "bench") {
     if (td) { td.innerText = win ? "🏆 레이드 성공!" : "💀 레이드 실패..."; td.style.color = win ? "gold" : "red" }
   } else {
     if (td) { td.innerText = win ? "🏆 승리!" : "💀 패배..."; td.style.color = win ? "gold" : "red" }
@@ -1817,24 +1902,21 @@ function showGameOver(data) {
   if (lb) { lb.style.display = "inline-block"; lb.disabled = false; lb.onclick = leaveGame }
 }
 
-// ══════════════════════════════════════════════════════════════════
-//  raid.js 패치 — 눈여아(Froslass) 전용 UI
-//  기존 raid.js에 아래 내용을 추가/수정
-// ══════════════════════════════════════════════════════════════════
-
-// ── [3] 온도 / 화염구슬 UI 업데이트 ───────────────────────────────
+// ── 눈여아 / 누클라바스 UI (변경 없음) ──────────────────────────────
 function updateFroslassUI(data) {
   if (data.boss_name !== "눈여아") return
 
-  const PLAYER_SLOTS = ["p1", "p2", "p3"]
   PLAYER_SLOTS.forEach(s => {
+    // [40인] 빈 슬롯 스킵
+    if ((data.active_slots ?? {})[s] === undefined) return
+    if (Object.keys(data.active_slots ?? {}).length > 0 && !data.active_slots[s]) return
+
     const prefix  = slotToPrefix(s)
     if (!prefix) return
 
     const hasBall = data[`${s}_fireball`]    ?? false
     const temp    = data[`${s}_temperature`] ?? 3
 
-    // 화염구슬 뱃지
     let ballEl = document.getElementById(`${prefix}-fireball-badge`)
     if (!ballEl) {
       ballEl = document.createElement("div")
@@ -1852,7 +1934,6 @@ function updateFroslassUI(data) {
     ballEl.style.display = hasBall ? "block" : "none"
     ballEl.textContent   = "🔥 화염구슬"
 
-    // 온도 표시 (화염구슬 없을 때만)
     let tempEl = document.getElementById(`${prefix}-temperature`)
     if (!tempEl) {
       tempEl = document.createElement("div")
@@ -1880,19 +1961,15 @@ function updateFroslassUI(data) {
     }
   })
 
-  // 화염구슬 전달 버튼 업데이트
   updateFireballPassButton(data)
-  // 눈속임 선택 UI 업데이트
   updateMirageUI(data)
 }
 
-// ── 누클라바스 UI ──────────────────────────────────────────────────
 function updateCatastroUI(data) {
   if (data.boss_name !== "누클라바스") return
   const state = data.boss_state ?? {}
   const phase = state.phase ?? 1
 
-  // ── 부위 HP 패널 (2페이즈) ────────────────────────────────────
   const partPanel = $("catastro-part-panel")
   if (partPanel) {
     partPanel.style.display = phase === 2 ? "block" : "none"
@@ -1927,7 +2004,6 @@ function updateCatastroUI(data) {
     }
   }
 
-  // ── 코어 HP 패널 (3페이즈) ────────────────────────────────────
   const corePanel = $("catastro-core-panel")
   if (corePanel) {
     corePanel.style.display = phase === 3 ? "block" : "none"
@@ -1959,7 +2035,6 @@ function updateCatastroUI(data) {
   }
 }
 
-// ── [4] 화염구슬 전달 버튼 ─────────────────────────────────────────
 function updateFireballPassButton(data) {
   if (data.boss_name !== "눈여아") return
   if (!mySlot) return
@@ -1975,14 +2050,13 @@ function updateFireballPassButton(data) {
       font-size:12px; font-weight:bold; cursor:pointer;
       width:100%; box-sizing:border-box;
     `
-    // 내 포켓몬 영역 아래에 삽입
     const myArea = document.getElementById("my-pokemon-area")
               ?? document.getElementById("my-controls")
     if (myArea) myArea.appendChild(btn)
   }
 
   const iHaveBall = data[`${mySlot}_fireball`] ?? false
-  const canPass   = iHaveBall && !gameOver && !isSpectator
+  const canPass   = iHaveBall && !gameOver && !isSpectator && myRosterStatus === "active"
 
   btn.style.display = iHaveBall ? "block" : "none"
   btn.textContent   = "🔥 화염구슬 전달"
@@ -2019,7 +2093,9 @@ function showFireballPassPopup(data) {
   const btnWrap = document.createElement("div")
   btnWrap.style.cssText = "display:flex; flex-direction:column; gap:6px;"
 
-  const targets = ["p1","p2","p3"].filter(s => s !== mySlot)
+  // [40인] active_slots에서 출전 중인 아군만 표시
+  const activeSlots = data.active_slots ?? {}
+  const targets = ["p1","p2","p3"].filter(s => s !== mySlot && activeSlots[s])
   targets.forEach(s => {
     const idx  = data[`${s}_active_idx`] ?? 0
     const pkmn = data[`${s}_entry`]?.[idx]
@@ -2060,7 +2136,6 @@ async function doPassFireball(fromSlot, toSlot) {
   }
 }
 
-// ── [5] 눈속임 선택 UI ─────────────────────────────────────────────
 function updateMirageUI(data) {
   if (data.boss_name !== "눈여아") return
 
@@ -2073,8 +2148,8 @@ function updateMirageUI(data) {
     return
   }
 
-  // 내 턴이고 행동 안 했을 때만 눈속임 선택 표시
-  if (!myTurn || actionDone || isSpectator) {
+  // [40인] bench / spectator는 눈속임 선택 불가
+  if (!myTurn || actionDone || isSpectator || myRosterStatus === "bench") {
     if (overlay) overlay.style.display = "none"
     return
   }
@@ -2142,11 +2217,8 @@ async function doAttackMirage(mirageIdx) {
   try {
     const result = await _attackMirage({ roomId: ROOM_ID, mySlot, mirageIdx })
     if (result.isReal) {
-      // 진짜 맞췄으면 정상 기술 선택으로 이어서 행동
-      // (눈속임은 해제되어 일반 기술 버튼이 활성화됨)
       actionDone = false
     }
-    // 가짜면 턴 소모 없이 온도만 감소 → 일반 행동 계속 가능
     if (!result.isReal) actionDone = false
   } catch (e) {
     console.error("mirage attack 오류:", e.message)
@@ -2154,38 +2226,185 @@ async function doAttackMirage(mirageIdx) {
   }
 }
 
-
 async function doSkipTurn(timerExpired = false) {
   try { await _skipTurn({ roomId: ROOM_ID, mySlot, timerExpired }) }
   catch (e) { console.warn("skipTurn 오류:", e.message); actionDone = false }
 }
 
+// ════════════════════════════════════════════════════════════════════
+//  [40인] Admin 슬롯 교체 패널
+//  role: admin인 경우 배틀 화면에 교체 패널 표시
+// ════════════════════════════════════════════════════════════════════
+function renderAdminSwapPanel(data, isAdmin) {
+  const panelId = "admin-swap-panel"
+  let panel = document.getElementById(panelId)
 
+  if (!isAdmin) {
+    if (panel) panel.style.display = "none"
+    return
+  }
+
+  if (!panel) {
+    panel = document.createElement("div")
+    panel.id = panelId
+    panel.style.cssText = `
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1.5px solid #e67e22;
+      border-radius: 10px;
+      background: rgba(230,126,34,0.05);
+      font-size: 11px;
+    `
+    const wrapper = $("battle-wrapper")
+    if (wrapper) wrapper.appendChild(panel)
+  }
+
+  panel.style.display = "block"
+  panel.innerHTML = ""
+
+  const title = document.createElement("div")
+  title.style.cssText = "font-weight:bold; color:#e67e22; margin-bottom:8px; font-size:12px;"
+  title.textContent = "⚙ Admin — 슬롯 교체"
+  panel.appendChild(title)
+
+  const roster   = data.roster ?? {}
+  const slots    = data.active_slots ?? {}
+
+  // 현재 출전 슬롯 3개
+  const slotGrid = document.createElement("div")
+  slotGrid.style.cssText = "display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:8px;"
+
+  PLAYER_SLOTS.forEach(slot => {
+    const uid  = slots[slot] ?? null
+    const nick = uid ? (roster[uid]?.nick ?? uid.slice(0,6)) : "비어있음"
+    const card = document.createElement("div")
+    card.style.cssText = `
+      padding:5px 8px; border-radius:8px;
+      border:1px solid ${uid ? "#4caf50" : "#aaa"};
+      background:${uid ? "rgba(76,175,80,0.08)" : "#f5f5f5"};
+      text-align:center; font-size:10px; color:#333;
+    `
+    card.innerHTML = `<b>${slot.toUpperCase()}</b><br>${nick}`
+    slotGrid.appendChild(card)
+  })
+  panel.appendChild(slotGrid)
+
+  // 대기열 목록
+  const benchList = Object.entries(roster)
+    .filter(([uid, m]) => m.status === "bench" || m.status === "spectator")
+    .sort((a, b) => (a[1].joinedAt ?? 0) - (b[1].joinedAt ?? 0))
+
+  if (benchList.length === 0) {
+    const empty = document.createElement("div")
+    empty.style.cssText = "color:#aaa; font-size:10px;"
+    empty.textContent = "대기 중인 플레이어 없음"
+    panel.appendChild(empty)
+    return
+  }
+
+  const benchTitle = document.createElement("div")
+  benchTitle.style.cssText = "color:#888; font-size:10px; margin-bottom:4px;"
+  benchTitle.textContent = "대기열"
+  panel.appendChild(benchTitle)
+
+  benchList.forEach(([uid, member]) => {
+    const row = document.createElement("div")
+    row.style.cssText = "display:flex; align-items:center; gap:6px; margin-bottom:4px;"
+
+    const nick = document.createElement("span")
+    nick.style.cssText = "flex:1; font-size:11px; color:#333;"
+    nick.textContent = `[${member.status === "bench" ? "대기" : "관전"}] ${member.nick ?? uid.slice(0,6)}`
+
+    const sel = document.createElement("select")
+    sel.style.cssText = "font-size:10px; padding:2px 4px; border-radius:4px; border:1px solid #ccc;"
+    sel.innerHTML = `<option value="">슬롯 선택</option>`
+    PLAYER_SLOTS.forEach(s => {
+      const opt = document.createElement("option")
+      opt.value = s
+      opt.textContent = `${s.toUpperCase()} (${slots[s] ? roster[slots[s]]?.nick ?? "누군가" : "비어있음"})`
+      sel.appendChild(opt)
+    })
+
+    const btn = document.createElement("button")
+    btn.textContent = "교체"
+    btn.style.cssText = `
+      padding:2px 8px; border-radius:4px; border:none;
+      background:#e67e22; color:#fff; font-size:10px; cursor:pointer;
+    `
+    btn.onclick = async () => {
+      const targetSlot = sel.value
+      if (!targetSlot) { alert("슬롯을 선택해줘!"); return }
+      const outUid = slots[targetSlot] ?? null
+      btn.disabled = true; btn.textContent = "처리 중..."
+      try {
+        await _adminSwapSlot({ roomId: ROOM_ID, outUid, inUid: uid, targetSlot })
+      } catch (e) {
+        alert(`교체 실패: ${e.message}`)
+        btn.disabled = false; btn.textContent = "교체"
+      }
+    }
+
+    row.appendChild(nick)
+    row.appendChild(sel)
+    row.appendChild(btn)
+    panel.appendChild(row)
+  })
+}
 
 // ── applyRoomData ────────────────────────────────────────────────────
 function applyRoomData(data) {
   currentRoomData = data
+  
+
+  // [40인] mySlot / myRosterStatus 갱신 (교체 후 변경될 수 있음)
+  if (myUid) {
+    const resolved = resolveMySlotAndStatus(data, myUid)
+    mySlot = resolved.slot
+    myRosterStatus = resolved.status
+    // spectator URL 파라미터 없어도 roster status가 spectator면 관전자 취급
+    if (resolved.status === "spectator" && !mySlot) isSpectator = true
+    // bench 플레이어는 spectator처럼 로그만 봄 (isSpectator는 false 유지)
+  }
 
   PLAYER_SLOTS.forEach(s => updateSlotUI(s, data))
   updateBossUI(data)
+  const bossPhase = data.boss_state?.phase ?? 1
+playBgm(bossPhase)
   updateFroslassUI(data)
   updateCatastroUI(data)
   updateBeedrillUI(data)
   updateResonanceModal(data)
   updateOrderDisplay(data)
   updateTurnUI(data)
-  if (!isSpectator) {
+
+  // [40인] bench가 아닌 출전 플레이어만 컨트롤 UI 업데이트
+  if (!isSpectator && mySlot && myRosterStatus === "active") {
     updateMoveButtons(data)
     updateBenchButtons(data)
     updateAssistUI(data)
     updateSyncUI(data)
     updateBagButton(data)
+  } else if (myRosterStatus === "bench") {
+    // bench: 버튼만 비활성화 표시
+    updateMoveButtons(data)
+    updateBagButton(data)
   }
+
+  // [40인] Admin 패널
+  const isAdmin = !!(data.roster?.[myUid]?.role === "admin" ||
+                     data[`player_role_${myUid}`] === "admin")
+  renderAdminSwapPanel(data, isAdmin)
+
   const spectEl = $("spectator-list")
   if (spectEl) {
-    const names = data.spectator_names ?? []
-    spectEl.innerText = names.length > 0 ? "관전: " + names.join(", ") : ""
+    // [40인] 관전자 + 대기열 표시
+    const roster     = data.roster ?? {}
+    const spectators = Object.values(roster).filter(m => m.status === "spectator").map(m => m.nick ?? "?")
+    const bench      = Object.values(roster).filter(m => m.status === "bench").map(m => `${m.nick ?? "?"}(대기)`)
+    const all        = [...spectators, ...bench]
+    spectEl.innerText = all.length > 0 ? "관전/대기: " + all.join(", ") : ""
   }
+
   if (data.game_over) { showGameOver(data); return }
 }
 
@@ -2216,13 +2435,27 @@ let lastSyncEventTs   = 0
 function listenRoom() {
   onSnapshot(roomRef, async snap => {
     const data = snap.data()
-    if (!data || !data.p1_entry) return
+    if (!data) return
+
+    // ── [40인] 최소 데이터 체크 ─────────────────────────────────
+    // roster 기반이면 roster 존재 여부, 레거시면 p1_entry
+    const hasRoster = !!(data.roster && Object.keys(data.roster).length > 0)
+    const hasLegacy = !!(data.p1_entry)
+    if (!hasRoster && !hasLegacy) return
+
+    // [40인] mySlot / myRosterStatus 갱신
+    if (myUid) {
+      const resolved = resolveMySlotAndStatus(data, myUid)
+      mySlot = resolved.slot
+      myRosterStatus = resolved.status
+    }
 
     const order           = data.current_order ?? []
     const currentTurnSlot = order[0] ?? null
     lastTurnSlot = currentTurnSlot
 
-    if (!isSpectator && !data.game_over) {
+    // [40인] active 상태인 경우만 턴 처리
+    if (!isSpectator && myRosterStatus === "active" && mySlot && !data.game_over) {
       const wasMyTurn   = myTurn
       const isMyTurnNow = order[0] === mySlot
       myTurn = isMyTurnNow
@@ -2285,9 +2518,12 @@ function listenRoom() {
       if (order.length === 0 && data.game_started && data.intro_done) {
         tryStartRound()
       }
+    } else if (!isSpectator && myRosterStatus === "bench") {
+      // bench 플레이어는 턴 관여 X, myTurn = false
+      myTurn = false
     }
 
-    if (!isSpectator && !data.game_over && mySlot) {
+    if (!isSpectator && myRosterStatus === "active" && !data.game_over && mySlot) {
       const myActiveIdx  = data[`${mySlot}_active_idx`] ?? 0
       const myActivePkmn = data[`${mySlot}_entry`]?.[myActiveIdx]
       const isFainted    = !myActivePkmn || myActivePkmn.hp <= 0
@@ -2327,7 +2563,6 @@ async function tryStartRound() {
   finally { setTimeout(() => startRoundLock = false, 3000) }
 }
 
-// ── 어시스트 / 싱크로 API ────────────────────────────────────────────
 async function doRequestAssist() {
   if (!myTurn) { alert("자신의 턴에만 지원 요청할 수 있어!"); return }
   try { await _requestAssist({ roomId: ROOM_ID, mySlot }) }
@@ -2372,15 +2607,24 @@ onAuthStateChanged(auth, async user => {
   const roomSnap = await getDoc(roomRef)
   const data     = roomSnap.data()
 
-  PLAYER_SLOTS.forEach(s => {
-    const slotKey = s.replace("p", "player")
-    if (data?.[`${slotKey}_uid`] === myUid) mySlot = s
-  })
+  // ── [40인] mySlot / myRosterStatus 결정 ─────────────────────
+  if (data) {
+    const resolved = resolveMySlotAndStatus(data, myUid)
+    mySlot         = resolved.slot
+    myRosterStatus = resolved.status
+  }
 
-  if (isSpectator) {
+  // URL spectator 파라미터 또는 roster status가 spectator/bench면 관전 모드
+  if (isSpectator || myRosterStatus === "spectator") {
     mySlot = null
+    isSpectator = true
     const td = $("turn-display")
     if (td) { td.innerText = "관전 중"; td.style.color = "gray" }
+  } else if (myRosterStatus === "bench") {
+    // bench: mySlot null, 채팅만 가능
+    mySlot = null
+    const td = $("turn-display")
+    if (td) { td.innerText = "📋 대기 중"; td.style.color = "#888" }
   }
 
   if (window.initRaidChat) {
@@ -2389,7 +2633,8 @@ onAuthStateChanged(auth, async user => {
     window.initRaidChat({ db, ROOM_ID, myUid, mySlot, isSpectator, gameStartedAt: data?.game_started_at ?? 0 })
   }
 
-  if (data?.p1_entry) applyRoomData(data)
+  // [40인] 초기 데이터 표시
+  if (data) applyRoomData(data)
   listenLogs(data?.game_started_at ?? 0)
   listenRoom()
 })
