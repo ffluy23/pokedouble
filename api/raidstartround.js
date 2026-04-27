@@ -2,7 +2,8 @@
 import { db } from "../lib/firestore.js"
 import { rollD10, corsHeaders } from "../lib/gameUtils.js"
 import { josa } from "../lib/effecthandler.js"
-import { executeBossAction, deepCopyEntries as deepCopyRaidEntries2 } from "../lib/raidBossAction.js"
+import { executeBossAction, deepCopyEntries as deepCopyRaidEntries2, hydrateSlotData } from "../lib/raidBossAction.js"
+
 
 const PLAYER_SLOTS = ["p1", "p2", "p3"]
 
@@ -25,6 +26,8 @@ export default async function handler(req, res) {
       if (!data.game_started) return { ok: false, reason: "not_started" }
       if (data.game_over)     return { ok: false, reason: "game_over" }
       if ((data.current_order ?? []).length > 0) return { ok: false, reason: "already_started" }
+      // ← 여기 추가
+  if (data.active_slots) hydrateSlotData(data)
 
       // ── 페이즈 판정 ────────────────────────────────────────────
       const bossHp    = data.boss_current_hp ?? 0
