@@ -4,6 +4,16 @@ import { rollD10, corsHeaders } from "../lib/gameUtils.js"
 import { josa } from "../lib/effecthandler.js"
 import { executeBossAction, deepCopyEntries as deepCopyRaidEntries2, hydrateSlotData } from "../lib/raidBossAction.js"
 
+const data = snap.data()
+console.log("[DEBUG]", JSON.stringify({
+  game_started: data.game_started,
+  game_over: data.game_over,
+  p1_entry: data.p1_entry ? "있음" : data.p1_entry,
+  p2_entry: data.p2_entry ? "있음" : data.p2_entry,
+  p3_entry: data.p3_entry ? "있음" : data.p3_entry,
+  current_order: data.current_order,
+  boss_current_hp: data.boss_current_hp,
+}))
 
 const PLAYER_SLOTS = ["p1", "p2", "p3"]
 
