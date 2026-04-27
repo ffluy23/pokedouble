@@ -1,15 +1,16 @@
-// js/raidroom.js
 import { auth, db } from "./firebase.js"
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"
 import {
   doc, getDoc, updateDoc, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
 
+const API = "https://sonnetpc.vercel.app/api"
 const roomRef = doc(db, "raid", ROOM_ID)
 let myUid         = null
 let myDisplayName = null
 let navigated     = false
 let isAdmin       = false
+let beginCalled   = false
 
 const PLAYER_SLOTS = ["player1", "player2", "player3"]
 const SLOT_TO_FS   = { player1: "p1", player2: "p2", player3: "p3" }
@@ -71,6 +72,17 @@ async function joinAsSpectator(room) {
   })
 }
 
+async function copyMyEntry(mySlot) {
+  const fsSlot   = SLOT_TO_FS[mySlot]
+  const userSnap = await getDoc(doc(db, "users", myUid))
+  const entry    = userSnap.data()?.entry ?? []
+  const entryWithMax = entry.map(p => ({ ...p, maxHp: p.hp }))
+  await updateDoc(roomRef, {
+    [`${fsSlot}_entry`]:      entryWithMax,
+    [`${fsSlot}_active_idx`]: 0
+  })
+}
+
 function listenRoom() {
   onSnapshot(roomRef, async snap => {
     const room = snap.data()
@@ -78,12 +90,10 @@ function listenRoom() {
 
     const mySlot = calcMySlot(room)
 
-    // 플레이어 슬롯 UI
     PLAYER_SLOTS.forEach(slot => {
       const nameEl  = document.getElementById(slot)
       const readyEl = document.getElementById(`${slot}-ready`)
       const name    = room[`${slot}_name`]
-
       if (nameEl) {
         nameEl.textContent = name ?? "대기 중..."
         nameEl.classList.toggle('empty', !name)
@@ -95,14 +105,12 @@ function listenRoom() {
       }
     })
 
-    // 관전자
     const spectEl = document.getElementById("spectator-list")
     if (spectEl) {
       const names = room.spectator_names ?? []
       spectEl.textContent = names.length > 0 ? "관전자: " + names.join(", ") : "관전자 없음"
     }
 
-    // 구역 변경 감지 → UI 동기화 (다른 사람이 바꿨을 때)
     if (room.selected_zone && typeof window.syncZoneUI === 'function') {
       window.syncZoneUI(room.selected_zone)
     }
@@ -110,61 +118,17 @@ function listenRoom() {
     updateButtons(room, mySlot)
     if (isAdmin) renderAdminPanel(room)
 
-    // 전원 레디 + 구역 선택 시 게임 시작
+    // 전원 레디 → entry 올리고 서버에 시작 요청
     const allReady = PLAYER_SLOTS.every(s => room[`${s}_ready`])
     if (allReady && room.selected_zone && !room.game_started && mySlot && mySlot !== "spectator") {
-      await copyMyEntry(mySlot)
-      await new Promise(r => setTimeout(r, 2000))
-
-      if (mySlot === "player1") {
-        let retries = 0
-        while (retries < 20) {
-          const freshSnap = await getDoc(roomRef)
-          const freshRoom = freshSnap.data()
-         const allUploaded = PLAYER_SLOTS.every(s => Array.isArray(freshRoom[`${SLOT_TO_FS[s]}_entry`]) && freshRoom[`${SLOT_TO_FS[s]}_entry`].length > 0)
-          if (allUploaded) {
-            // 보스 데이터 복사 (boss/{bossId} → raid/{roomId})
-            const bossId   = freshRoom.boss_id ?? null
-            let bossUpdate = {}
-            if (bossId) {
-              const bossSnap = await getDoc(doc(db, "boss", bossId))
-              const bossData = bossSnap.data()
-              if (bossData) {
-                bossUpdate = {
-                  boss_name:       bossData.boss_name    ?? bossId,
-                  boss_current_hp: bossData.hp           ?? 1000,
-                  boss_max_hp:     bossData.hp           ?? 1000,
-                  boss_attack:     bossData.attack       ?? 5,
-                  boss_defense:    bossData.defense      ?? 5,
-                  boss_speed:      bossData.speed        ?? 5,
-                  boss_type:       bossData.type         ?? ["노말"],
-                  boss_moves:      bossData.moves        ?? [],
-                  boss_ult:        bossData.ult          ?? [],
-                  boss_status:     null,
-                  boss_rank:       { atk:0, atkTurns:0, def:0, defTurns:0, spd:0, spdTurns:0 },
-                  boss_volatile:   {},
-                  boss_state:      { phase1Step: "bite", repeatLeft: 0 },
-                  boss_last_move:  null,
-                  boss_last_attacker: null,
-                  boss_damage_taken:  { p1: 0, p2: 0, p3: 0 },
-                  boss_ult_cooldown:  0,
-                }
-              }
-            }
-            await updateDoc(roomRef, {
-              ...bossUpdate,
-              game_started:    true,
-              game_started_at: Date.now(),
-              round_count:     0,
-              turn_count:      0,
-              current_order:   [],
-            })
-            break
-          }
-          await new Promise(r => setTimeout(r, 1000))
-
-          retries++
-        }
+      if (!beginCalled) {
+        beginCalled = true
+        await copyMyEntry(mySlot)
+        await fetch(`${API}/raidBegin`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomId: ROOM_ID })
+        }).catch(e => { console.error("raidBegin 오류:", e); beginCalled = false })
       }
     }
 
@@ -175,7 +139,6 @@ function listenRoom() {
       if (navigated) return
       navigated = true
 
-      // selected_zone 기준으로 battleroom 결정
       const zoneData = typeof window.getZoneData === 'function' ? window.getZoneData() : {}
       const zoneInfo = zoneData[room.selected_zone]
       const roomFile = zoneInfo?.room ?? "battleroom1"
@@ -188,14 +151,12 @@ function listenRoom() {
   })
 }
 
-// ── 구역 선택 (HTML에서 호출) ────────────────────────────────────────
 window.setSelectedZone = async function(zoneKey) {
   const zoneData = typeof window.getZoneData === 'function' ? window.getZoneData() : {}
   const bossId   = zoneData[zoneKey]?.bossId ?? null
   await updateDoc(roomRef, { selected_zone: zoneKey, boss_id: bossId })
 }
 
-// ── 어드민 패널 ──────────────────────────────────────────────────────
 let adminSelected = null
 
 function slotLabel(slot) {
@@ -212,7 +173,6 @@ function renderAdminPanel(room) {
     const uid  = room[`${slot}_uid`]
     const name = room[`${slot}_name`] ?? "빈 자리"
     const isSelected = adminSelected?.type === "player" && adminSelected.slot === slot
-
     const btn = document.createElement("button")
     btn.className = "admin-slot-btn"
       + (isSelected ? " selected" : "")
@@ -227,7 +187,6 @@ function renderAdminPanel(room) {
   spectators.forEach((uid, idx) => {
     const name = spectatorNames[idx] ?? uid.slice(0, 6)
     const isSelected = adminSelected?.type === "spectator" && adminSelected.uid === uid
-
     const btn = document.createElement("button")
     btn.className = "admin-slot-btn" + (isSelected ? " selected" : "")
     btn.innerHTML = `<span class="admin-slot-label">관전자</span><span class="admin-slot-name">${name}</span>`
@@ -255,7 +214,6 @@ function onAdminClick(target, room) {
       ? adminSelected.slot === target.slot
       : adminSelected.uid  === target.uid)
   if (isSame) { adminSelected = null; renderAdminPanel(room); return }
-
   adminForceSwap(adminSelected, target, room)
   adminSelected = null
 }
@@ -294,23 +252,9 @@ async function adminForceSwap(a, b, room) {
     update.spectators      = spectators
     update.spectator_names = spectatorNames
   }
-
   await updateDoc(roomRef, update)
 }
 
-// ── 엔트리 복사 ──────────────────────────────────────────────────────
-async function copyMyEntry(mySlot) {
-  const fsSlot   = SLOT_TO_FS[mySlot]
-  const userSnap = await getDoc(doc(db, "users", myUid))
-  const entry    = userSnap.data()?.entry ?? []
-  const entryWithMax = entry.map(p => ({ ...p, maxHp: p.hp }))
-  await updateDoc(roomRef, {
-    [`${fsSlot}_entry`]:      entryWithMax,
-    [`${fsSlot}_active_idx`]: 0
-  })
-}
-
-// ── 버튼 상태 ────────────────────────────────────────────────────────
 function updateButtons(room, mySlot) {
   const isPlayer    = mySlot && mySlot !== "spectator"
   const isSpectator = mySlot === "spectator"
@@ -323,34 +267,28 @@ function updateButtons(room, mySlot) {
     readyBtn.style.display = isPlayer ? "inline-block" : "none"
     if (isPlayer) {
       const alreadyReady = !!room[`${mySlot}_ready`]
-      readyBtn.disabled  = alreadyReady
+      readyBtn.disabled    = alreadyReady
       readyBtn.textContent = alreadyReady ? "Ready ✅" : "Ready"
     }
   }
-
   if (swapBtn) {
     const hasEmpty = PLAYER_SLOTS.some(s => !room[`${s}_uid`])
     swapBtn.style.display = isSpectator && hasEmpty && !room.game_started ? "inline-block" : "none"
   }
-
   if (leaveBtn) leaveBtn.disabled = isPlayer && !!room.game_started
 }
 
-// ── 버튼 이벤트 ──────────────────────────────────────────────────────
 function setupButtons() {
   document.getElementById("readyBtn").onclick = async () => {
     const snap   = await getDoc(roomRef)
     const room   = snap.data()
     const mySlot = calcMySlot(room)
     if (!mySlot || mySlot === "spectator") return
-
-    // 구역 미선택 체크
     if (!room.selected_zone) {
       const hintEl = typeof window.getZoneHintEl === 'function' ? window.getZoneHintEl() : null
       if (hintEl) hintEl.textContent = "구역을 먼저 선택해줘!"
       return
     }
-
     await updateDoc(roomRef, { [`${mySlot}_ready`]: true })
   }
 
@@ -377,7 +315,6 @@ function setupButtons() {
   }
 }
 
-// ── 퇴장 ─────────────────────────────────────────────────────────────
 async function leaveRoom(mySlot, room) {
   if (mySlot && mySlot !== "spectator") {
     const spectators     = room.spectators ?? []
