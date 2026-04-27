@@ -8,25 +8,36 @@ import { executeBossAction, deepCopyEntries as deepCopyRaidEntries2, hydrateSlot
 const PLAYER_SLOTS = ["p1", "p2", "p3"]
 
 // ── 레거시 방(active_slots 비어있음) 호환 패치 ───────────────────────
-// player1_uid/player2_uid/player3_uid → active_slots + roster 구조로 채워줌
-// hydrateSlotData가 정상 동작하려면 active_slots에 uid가 있어야 함
+// - roster에 유효한 entry가 있으면 절대 덮어쓰지 않음 (교체/데미지 반영값 보존)
+// - roster entry가 없을 때만 p1_entry 최상위 필드로 초기화
 function patchLegacySlots(data) {
   const activeSlots = data.active_slots ?? {}
   const hasActiveSlots = Object.values(activeSlots).some(v => !!v)
-  if (hasActiveSlots) return  // 이미 정상 구조면 스킵
+  if (hasActiveSlots) return
 
   const SLOT_MAP = { p1: "player1", p2: "player2", p3: "player3" }
   for (const [slot, playerKey] of Object.entries(SLOT_MAP)) {
-    const uid   = data[`${playerKey}_uid`]
-    const entry = data[`${slot}_entry`]
-    if (!uid || !entry) continue
+    const uid = data[`${playerKey}_uid`]
+    if (!uid) continue
 
-    // active_slots 채우기
     data.active_slots = data.active_slots ?? {}
     data.active_slots[slot] = uid
-
-    // roster 채우기 (hydrateSlotData가 roster.uid.entry를 참조)
     data.roster = data.roster ?? {}
+
+    // roster에 이미 유효한 entry가 있으면 entry는 건드리지 않음
+    if (data.roster[uid]?.entry?.length > 0) {
+      data.roster[uid] = {
+        ...data.roster[uid],
+        status: "active",
+        slot,
+        nick: (data[`${playerKey}_name`] ?? uid).split("]").pop().trim(),
+      }
+      continue
+    }
+
+    // entry가 없을 때만 p1_entry로 초기화
+    const entry = data[`${slot}_entry`]
+    if (!entry) continue
     data.roster[uid] = {
       ...(data.roster[uid] ?? {}),
       entry:      JSON.parse(JSON.stringify(entry)),
@@ -64,31 +75,26 @@ export default async function handler(req, res) {
       if (data.game_over)     return { ok: false, reason: "game_over" }
       if ((data.current_order ?? []).length > 0) return { ok: false, reason: "already_started" }
 
-      // ── 레거시 구조 패치 후 hydrate ──────────────────────────
       patchLegacySlots(data)
       hydrateSlotData(data)
 
-      // ── 페이즈 판정 ────────────────────────────────────────────
       const bossHp    = data.boss_current_hp ?? 0
       const bossMaxHp = data.boss_max_hp     ?? 1
       const isPhase2  = bossHp / bossMaxHp <= 0.7
-
       const alwaysFirst = data.boss_name === "누클라바스"
 
-      // ── 살아있는 슬롯 수집 ──────────────────────────────────────
       const activeSlots = PLAYER_SLOTS.filter(s => {
         if (data.active_slots && !data.active_slots[s]) return false
         return (data[`${s}_entry`] ?? []).some(p => p.hp > 0)
       })
 
-      console.log("[DEBUG] activeSlots:", activeSlots, "| active_slots map:", data.active_slots)
+      console.log("[DEBUG] activeSlots:", activeSlots)
 
       const bossAlive = bossHp > 0
       if (activeSlots.length === 0 && !bossAlive) return { ok: false, reason: "no_active_slots" }
 
       const allSlots = bossAlive ? [...activeSlots, "boss"] : activeSlots
 
-      // ── 주사위 굴리기 ───────────────────────────────────────────
       const rolls  = {}
       const scores = {}
 
@@ -105,7 +111,6 @@ export default async function handler(req, res) {
         scores["boss"] = (data.boss_speed ?? 5) + rolls["boss"]
       }
 
-      // ── 순서 정렬 ────────────────────────────────────────────────
       let order = [...allSlots].sort((a, b) => {
         const diff = scores[b] - scores[a]
         return diff !== 0 ? diff : (Math.random() < 0.5 ? -1 : 1)
@@ -115,11 +120,9 @@ export default async function handler(req, res) {
         order = ["boss", ...order.filter(s => s !== "boss")]
       }
 
-      // ── 기습 쿨다운 틱 ──────────────────────────────────────────
       const ultCooldown     = data.boss_ult_cooldown ?? 0
       const nextUltCooldown = Math.max(0, ultCooldown - 1)
-
-      const roundNum = (data.round_count ?? 0) + 1
+      const roundNum        = (data.round_count ?? 0) + 1
 
       tx.update(roomRef, {
         round_count:       roundNum,
@@ -181,13 +184,11 @@ export default async function handler(req, res) {
 
     const { data: _d, ...safeResult } = result
 
-    // ── 보스 선공이면 서버에서 즉시 처리 ────────────────────────
     if (result.order?.[0] === "boss") {
       const snap2     = await db.collection("raid").doc(roomId).get()
       const freshData = snap2.data()
 
       if (freshData && !freshData.game_over) {
-        // 레거시 구조면 동일하게 패치
         patchLegacySlots(freshData)
         const freshEntries = deepCopyRaidEntries2(freshData)
         await executeBossAction(roomId, freshData, freshEntries, freshData.current_order ?? [])
