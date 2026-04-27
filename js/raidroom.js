@@ -114,10 +114,11 @@ function listenRoom() {
     const allReady = PLAYER_SLOTS.every(s => room[`${s}_ready`])
     if (allReady && room.selected_zone && !room.game_started && mySlot && mySlot !== "spectator") {
       await copyMyEntry(mySlot)
+      await new Promise(r => setTimeout(r, 2000))
 
       if (mySlot === "player1") {
         let retries = 0
-        while (retries < 10) {
+        while (retries < 20) {
           const freshSnap = await getDoc(roomRef)
           const freshRoom = freshSnap.data()
          const allUploaded = PLAYER_SLOTS.every(s => Array.isArray(freshRoom[`${SLOT_TO_FS[s]}_entry`]) && freshRoom[`${SLOT_TO_FS[s]}_entry`].length > 0)
@@ -160,7 +161,8 @@ function listenRoom() {
             })
             break
           }
-          await new Promise(r => setTimeout(r, 500))
+          await new Promise(r => setTimeout(r, 1000))
+
           retries++
         }
       }
