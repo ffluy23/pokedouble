@@ -23,10 +23,18 @@ export default async function handler(req, res) {
     if (data.game_over)     return res.status(400).json({ error: "게임 종료됨" })
 
     // ── 모든 entry 확인 ──────────────────────────────────────────
-    const allEntryReady = PLAYER_SLOTS.every(s =>
-      Array.isArray(data[`${s}_entry`]) && data[`${s}_entry`].length > 0
-    )
-    if (!allEntryReady) return res.status(400).json({ error: "entry 미완료" })
+   // entry 확인 — 최대 10초 대기
+let allEntryReady = false
+for (let i = 0; i < 20; i++) {
+  const freshSnap = await roomRef.get()
+  const freshData = freshSnap.data()
+  allEntryReady = PLAYER_SLOTS.every(s =>
+    Array.isArray(freshData[`${s}_entry`]) && freshData[`${s}_entry`].length > 0
+  )
+  if (allEntryReady) { Object.assign(data, freshData); break }
+  await new Promise(r => setTimeout(r, 500))
+}
+if (!allEntryReady) return res.status(400).json({ error: "entry 미완료 (타임아웃)" })
 
     // ── 보스 데이터 로드 ─────────────────────────────────────────
     const bossId = data.boss_id ?? null
