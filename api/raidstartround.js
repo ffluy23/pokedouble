@@ -153,7 +153,6 @@ if (result.order?.[0] === "boss") {
   const snap2 = await db.collection("raid").doc(roomId).get()
   const freshData = snap2.data()
   if (freshData && !freshData.game_over) {
-    if (freshData.active_slots) hydrateSlotData(freshData)  // ← 추가
     const freshEntries = deepCopyRaidEntries2(freshData)
     await executeBossAction(roomId, freshData, freshEntries, freshData.current_order ?? [])
       .catch(e => console.warn("보스 선공 처리 오류:", e.message))
