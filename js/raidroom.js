@@ -120,7 +120,7 @@ function listenRoom() {
         while (retries < 10) {
           const freshSnap = await getDoc(roomRef)
           const freshRoom = freshSnap.data()
-          const allUploaded = PLAYER_SLOTS.every(s => freshRoom[`${SLOT_TO_FS[s]}_entry`] !== null)
+         const allUploaded = PLAYER_SLOTS.every(s => Array.isArray(freshRoom[`${SLOT_TO_FS[s]}_entry`]) && freshRoom[`${SLOT_TO_FS[s]}_entry`].length > 0)
           if (allUploaded) {
             // 보스 데이터 복사 (boss/{bossId} → raid/{roomId})
             const bossId   = freshRoom.boss_id ?? null
