@@ -44,9 +44,10 @@ export default async function handler(req, res) {
       const alwaysFirst = data.boss_name === "누클라바스"
 
       // ── 살아있는 슬롯 수집 (플레이어 + 보스) ───────────────────
-      const activeSlots = PLAYER_SLOTS.filter(s =>
-        (data[`${s}_entry`] ?? []).some(p => p.hp > 0)
-      )
+      const activeSlots = PLAYER_SLOTS.filter(s => {
+  if (data.active_slots && !data.active_slots[s]) return false
+  return (data[`${s}_entry`] ?? []).some(p => p.hp > 0)
+})
       const bossAlive = bossHp > 0
       if (activeSlots.length === 0 && !bossAlive) return { ok: false, reason: "no_active_slots" }
 
