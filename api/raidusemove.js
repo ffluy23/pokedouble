@@ -110,15 +110,11 @@ function deepCopyRaidEntries(data) {
 //  active_slots가 있으면 roster 패치 반환, 없으면 기존 방식
 // ════════════════════════════════════════════════════════════════════
 function buildRaidEntryUpdate(entries, data = null) {
-  if (data?.active_slots) {
-    return dehydrateSlotData(data, entries)   // { "roster.{uid}.entry": [...], ... }
-  }
-  // 기존 방식 (하위 호환)
   const update = {}
   PLAYER_SLOTS.forEach(s => { update[`${s}_entry`] = entries[s] })
+  if (data?.active_slots) Object.assign(update, dehydrateSlotData(data, entries))
   return update
 }
-
 function tickRanks(pokemon, logEntries) {
   if (!pokemon.ranks) return
   const r = pokemon.ranks
