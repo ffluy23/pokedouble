@@ -43,7 +43,10 @@ const _rejectSync    = (data) => callApi("raidrejectsync",    data)
 const _leaveGame     = (data) => callApi("raidleavegame",     data)
 const _bossTurn      = (data) => callApi("raidbossturn",      data)
 const _passFireball  = (data) => callApi("raidPassFireball",  data)
-const _attackMirage  = (data) => callApi("raidAttackMirage",  data)
+const _attackMirage   = (data) => callApi("raidAttackMirage",  data)
+const _standChoice    = (data) => callApi("raidStandChoice",   data)
+const _resonanceAgree = (data) => callApi("raidResonance",     { ...data, action: "agree" })
+const _resonanceFire  = (data) => callApi("raidResonance",     { ...data, action: "fire"  })
 const roomRef = doc(db, "raid", ROOM_ID)
 const logsRef = collection(db, "raid", ROOM_ID, "logs")
 
@@ -81,6 +84,7 @@ function wait(ms)  { return new Promise(r => setTimeout(r, ms)) }
 function otherPlayerSlots() { return PLAYER_SLOTS.filter(s => s !== mySlot) }
 function isPlayerSlot(slot) { return PLAYER_SLOTS.includes(slot) }
 function isBeedrillSlot(slot) { return slot === "beedrill_0" || slot === "beedrill_1" }
+function isPartSlot(slot) { return ["eye","wing","tail","claw"].includes(slot) }
 
 function anyBeedrillAlive(data) {
   return (data.Beedrill ?? []).some(b => b.hp > 0)
@@ -161,8 +165,40 @@ function updateSlotUI(slot, data) {
     nameEl.innerText   = (pokemon.name ?? "???") + statusTag + confusionTag + flyTag + digTag + grudgeTag
   }
 
-  updateHpBar(`${prefix}-hp-bar`, `${prefix}-active-hp`, pokemon.hp, pokemon.maxHp, prefix === "my")
+ updateHpBar(`${prefix}-hp-bar`, `${prefix}-active-hp`, pokemon.hp, pokemon.maxHp, prefix === "my")
   updatePortrait(prefix, pokemon)
+
+  // ── 누클라바스 4페이즈 상태 뱃지 ──────────────────────────────
+  if (currentRoomData?.boss_name === "누클라바스") {
+    const BADGES = [
+      { key: `${slot}_ominous`,  id: `${prefix}-badge-ominous`,  label: "🔴 흉조",  color: "#c0392b" },
+      { key: `${slot}_doomed`,   id: `${prefix}-badge-doomed`,   label: "💀 사멸",  color: "#6c3483" },
+      { key: `${slot}_collapse`, id: `${prefix}-badge-collapse`, label: "💥 붕괴",  color: "#784212" },
+      { key: `${slot}_tragedy`,  id: `${prefix}-badge-tragedy`,  label: "🔗 비극",  color: "#1a5276" },
+    ]
+    const hpCard = document.querySelector(`#${prefix}-pokemon-area .hp-card`)
+               ?? document.getElementById(`${prefix}-active-hp`)?.closest(".hp-card")
+    if (hpCard) {
+      BADGES.forEach(({ key, id, label, color }) => {
+        let el = document.getElementById(id)
+        const active = !!(currentRoomData[key])
+        if (!active) { if (el) el.style.display = "none"; return }
+        if (!el) {
+          el = document.createElement("div")
+          el.id = id
+          el.style.cssText = `
+            font-size: 10px; font-weight: bold; color: #fff;
+            padding: 1px 7px; border-radius: 8px; margin-top: 2px;
+            display: inline-block;
+          `
+          hpCard.appendChild(el)
+        }
+        el.style.display    = "inline-block"
+        el.style.background = color
+        el.textContent      = label
+      })
+    }
+  }
 }
 
 // ── 보스 UI ──────────────────────────────────────────────────────────
@@ -506,7 +542,7 @@ async function handleLogEntry(entry) {
       await wait(200)
       break
     }
-    case "beedrill_hp": {
+   case "beedrill_hp": {
       if (meta?.beedrills) {
         meta.beedrills.forEach((bee, i) => {
           const hpBar = $(`beedrill-hp-bar-${i}`)
@@ -520,6 +556,50 @@ async function handleLogEntry(entry) {
         })
       }
       if (text) await typeText(logEl, text)
+      await wait(100)
+      break
+    }
+    case "part_hp": {
+      // 누클라바스 부위 HP 업데이트
+      if (meta?.part) {
+        const bar = $(`part-hp-bar-${meta.part}`)
+        const num = $(`part-hp-num-${meta.part}`)
+        if (bar && meta.maxHp > 0) {
+          const pct = Math.max(0, meta.hp / meta.maxHp * 100)
+          bar.style.transition      = "width 0.4s ease"
+          bar.style.width           = `${pct}%`
+          bar.style.backgroundColor = pct > 50 ? "#4caf50" : pct > 20 ? "#ff9800" : "#f44336"
+          setTimeout(() => { bar.style.transition = "" }, 420)
+        }
+        if (num) num.textContent = `${meta.hp} / ${meta.maxHp}`
+        if (meta.hp <= 0) {
+          const card = $(`part-card-${meta.part}`)
+          if (card) card.classList.add("part-destroyed")
+        }
+      }
+      await wait(100)
+      break
+    }
+    case "core_hp": {
+      // 누클라바스 코어 HP 업데이트
+      if (meta?.coreId) {
+        const bar = $("core-hp-bar")
+        const num = $("core-hp-num")
+        const nameEl = $("core-name")
+        if (nameEl) nameEl.textContent = meta.name ?? ""
+        if (bar && meta.maxHp > 0) {
+          const pct = Math.max(0, meta.hp / meta.maxHp * 100)
+          bar.style.transition      = "width 0.4s ease"
+          bar.style.width           = `${pct}%`
+          bar.style.backgroundColor = pct > 50 ? "#4caf50" : pct > 20 ? "#ff9800" : "#f44336"
+          setTimeout(() => { bar.style.transition = "" }, 420)
+        }
+        if (num) num.textContent = `${meta.hp} / ${meta.maxHp}`
+        if (meta.hp <= 0) {
+          const card = $("core-hp-card")
+          if (card) card.classList.add("core-destroyed")
+        }
+      }
       await wait(100)
       break
     }
@@ -537,6 +617,20 @@ async function handleLogEntry(entry) {
     // ── 조로아크 일루전 ──────────────────────────────────────────
     case "zoroark_illusion": {
       if (meta) activateIllusionUI(meta)
+      await wait(400)
+      break
+    }
+    case "stand_choice": {
+      // 막아선다/물러난다 선택 팝업 — 탱커 슬롯 본인에게만 표시
+      if (meta?.tankSlot && meta.tankSlot === mySlot && !isSpectator) {
+        showStandChoicePopup(meta.tankSlot, currentRoomData)
+      }
+      await wait(200)
+      break
+    }
+    case "catastro_resonance_modal": {
+      // 레조넌스 모달 — 전원에게 표시
+      showResonanceModal(currentRoomData)
       await wait(400)
       break
     }
@@ -828,7 +922,219 @@ function showTauntText(text) {
   })
 }
 
-// ── 조로아크 일루전 UI ───────────────────────────────────────────────
+// ── 누클라바스 막아선다/물러난다 팝업 ─────────────────────────────
+function showStandChoicePopup(tankSlot, data) {
+  const existing = document.getElementById("stand-choice-popup")
+  if (existing) existing.remove()
+
+  const popup = document.createElement("div")
+  popup.id = "stand-choice-popup"
+  popup.style.cssText = `
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9800;
+    background: #1a1a2e; border: 2px solid #535ca8;
+    border-radius: 14px; padding: 20px 22px;
+    font-size: 13px; color: #e0e0ff;
+    display: flex; flex-direction: column; gap: 14px;
+    box-shadow: 0 0 40px rgba(83,92,168,0.5);
+    min-width: 240px; text-align: center;
+  `
+
+  const title = document.createElement("div")
+  title.style.cssText = "font-size: 15px; font-weight: bold; color: #a0aaff; letter-spacing: 0.05em;"
+  title.textContent   = "⚠ 선택하라!"
+  popup.appendChild(title)
+
+  const desc = document.createElement("div")
+  desc.style.cssText  = "font-size: 11px; color: #aaa; line-height: 1.6;"
+  desc.textContent    = "막아선다: 자신이 70% 흡수, 동료는 각 15%\n물러난다: 전원에게 동등하게 분배"
+  desc.style.whiteSpace = "pre-line"
+  popup.appendChild(desc)
+
+  const btnWrap = document.createElement("div")
+  btnWrap.style.cssText = "display: flex; gap: 10px;"
+
+  const standBtn = document.createElement("button")
+  standBtn.textContent = "🛡 막아선다"
+  standBtn.style.cssText = `
+    flex: 1; padding: 10px; border-radius: 10px;
+    border: none; background: #535ca8; color: #fff;
+    font-size: 13px; font-weight: bold; cursor: pointer;
+    font-family: inherit;
+  `
+  standBtn.onclick = async () => {
+    popup.remove()
+    try { await _standChoice({ roomId: ROOM_ID, mySlot, choice: "stand" }) }
+    catch (e) { console.error("standChoice 오류:", e.message) }
+  }
+
+  const backBtn = document.createElement("button")
+  backBtn.textContent = "💨 물러난다"
+  backBtn.style.cssText = `
+    flex: 1; padding: 10px; border-radius: 10px;
+    border: none; background: #4c4948; color: #fff;
+    font-size: 13px; font-weight: bold; cursor: pointer;
+    font-family: inherit;
+  `
+  backBtn.onclick = async () => {
+    popup.remove()
+    try { await _standChoice({ roomId: ROOM_ID, mySlot, choice: "step_back" }) }
+    catch (e) { console.error("standChoice 오류:", e.message) }
+  }
+
+  btnWrap.appendChild(standBtn)
+  btnWrap.appendChild(backBtn)
+  popup.appendChild(btnWrap)
+  document.body.appendChild(popup)
+
+  // 30초 후 자동 물러난다
+  setTimeout(() => {
+    if (document.getElementById("stand-choice-popup")) {
+      popup.remove()
+      _standChoice({ roomId: ROOM_ID, mySlot, choice: "step_back" }).catch(() => {})
+    }
+  }, 30000)
+}
+
+// ── 누클라바스 레조넌스 모달 ──────────────────────────────────────
+function showResonanceModal(data) {
+  const existing = document.getElementById("resonance-modal")
+  if (existing) existing.remove()
+
+  const modal = document.createElement("div")
+  modal.id = "resonance-modal"
+  modal.style.cssText = `
+    position: fixed; inset: 0; z-index: 9900;
+    background: rgba(0,0,0,0.82);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px;
+  `
+
+  const title = document.createElement("div")
+  title.style.cssText = `
+    font-size: clamp(20px, 5vw, 36px); font-weight: 900;
+    color: #fff; letter-spacing: 0.12em; text-align: center;
+    text-shadow: 0 0 20px #535ca8, 0 0 40px #535ca8;
+    animation: resonancePulse 1.2s ease-in-out infinite;
+  `
+  title.textContent = "RESONANCE"
+
+  // CSS 애니메이션 주입
+  if (!document.getElementById("resonance-style")) {
+    const style = document.createElement("style")
+    style.id = "resonance-style"
+    style.textContent = `
+      @keyframes resonancePulse {
+        0%,100% { opacity: 1; transform: scale(1); }
+        50%      { opacity: 0.7; transform: scale(1.04); }
+      }
+    `
+    document.head.appendChild(style)
+  }
+
+  const sub = document.createElement("div")
+  sub.style.cssText = "font-size: 13px; color: #aaa; text-align: center; max-width: 300px; line-height: 1.7;"
+  sub.textContent   = "누클라바스가 최후의 일격을 준비하고 있다.\n동료와 함께 힘을 모아 막아내라!"
+  sub.style.whiteSpace = "pre-line"
+
+  const agreedEl = document.createElement("div")
+  agreedEl.id = "resonance-agreed-count"
+  agreedEl.style.cssText = "font-size: 12px; color: #7a8aff;"
+  const agreedCount = (data.resonance_agreed ?? []).length
+  agreedEl.textContent = `동의: ${agreedCount} / 3`
+
+  const btnWrap = document.createElement("div")
+  btnWrap.style.cssText = "display: flex; flex-direction: column; gap: 10px; align-items: center;"
+
+  // 동의 버튼 (관전자 제외, 아직 동의 안 한 경우)
+  if (!isSpectator && myUid) {
+    const alreadyAgreed = (data.resonance_agreed ?? []).includes(myUid)
+    const agreeBtn = document.createElement("button")
+    agreeBtn.id = "resonance-agree-btn"
+    agreeBtn.textContent = alreadyAgreed ? "✅ 동의함" : "💠 동의한다"
+    agreeBtn.disabled    = alreadyAgreed
+    agreeBtn.style.cssText = `
+      padding: 12px 32px; border-radius: 12px; border: none;
+      background: ${alreadyAgreed ? "#444" : "#535ca8"}; color: #fff;
+      font-size: 14px; font-weight: bold; cursor: ${alreadyAgreed ? "not-allowed" : "pointer"};
+      font-family: inherit; letter-spacing: 0.05em;
+      transition: background 0.2s;
+    `
+    agreeBtn.onclick = async () => {
+      agreeBtn.disabled = true
+      agreeBtn.textContent = "✅ 동의함"
+      agreeBtn.style.background = "#444"
+      try { await _resonanceAgree({ roomId: ROOM_ID, myUid }) }
+      catch (e) { console.error("resonanceAgree 오류:", e.message) }
+    }
+    btnWrap.appendChild(agreeBtn)
+  }
+
+  // 어드민 발동 버튼 (role: admin인 경우에만 표시)
+  // — 실제 어드민 여부는 서버에서 검증하지만 UI는 미리 표시
+  const adminFireBtn = document.createElement("button")
+  adminFireBtn.id = "resonance-fire-btn"
+  adminFireBtn.textContent = "⚡ 레조넌스 발동"
+  adminFireBtn.disabled    = !(data.resonance_ready ?? false)
+  adminFireBtn.style.cssText = `
+    padding: 10px 24px; border-radius: 10px; border: none;
+    background: ${data.resonance_ready ? "#e74c3c" : "#555"}; color: #fff;
+    font-size: 13px; font-weight: bold;
+    cursor: ${data.resonance_ready ? "pointer" : "not-allowed"};
+    font-family: inherit;
+    transition: background 0.2s;
+  `
+  adminFireBtn.onclick = async () => {
+    if (!data.resonance_ready) return
+    adminFireBtn.disabled = true
+    adminFireBtn.textContent = "발동 중..."
+    try { await _resonanceFire({ roomId: ROOM_ID, myUid }) }
+    catch (e) {
+      console.error("resonanceFire 오류:", e.message)
+      adminFireBtn.disabled = false
+      adminFireBtn.textContent = "⚡ 레조넌스 발동"
+    }
+  }
+  btnWrap.appendChild(adminFireBtn)
+
+  modal.appendChild(title)
+  modal.appendChild(sub)
+  modal.appendChild(agreedEl)
+  modal.appendChild(btnWrap)
+  document.body.appendChild(modal)
+}
+
+// ── 레조넌스 모달 업데이트 (roomData 변경 시) ─────────────────────
+function updateResonanceModal(data) {
+  const modal = document.getElementById("resonance-modal")
+  if (!modal) return
+
+  const agreedEl = document.getElementById("resonance-agreed-count")
+  if (agreedEl) agreedEl.textContent = `동의: ${(data.resonance_agreed ?? []).length} / 3`
+
+  const agreeBtn = document.getElementById("resonance-agree-btn")
+  if (agreeBtn && myUid && (data.resonance_agreed ?? []).includes(myUid)) {
+    agreeBtn.disabled = true
+    agreeBtn.textContent = "✅ 동의함"
+    agreeBtn.style.background = "#444"
+  }
+
+  const fireBtn = document.getElementById("resonance-fire-btn")
+  if (fireBtn) {
+    fireBtn.disabled = !(data.resonance_ready ?? false)
+    fireBtn.style.background    = data.resonance_ready ? "#e74c3c" : "#555"
+    fireBtn.style.cursor        = data.resonance_ready ? "pointer"  : "not-allowed"
+    if (data.resonance_ready) fireBtn.textContent = "⚡ 레조넌스 발동"
+  }
+
+  // 게임 오버(victory)면 모달 닫기
+  if (data.game_over) {
+    modal.remove()
+  }
+}
+
+// ── 조로아크 일루전 UI ───────────────────────────────────────────
 function activateIllusionUI(meta) {
   const { illusionHp, illusionMaxHp, illusionName, illusionPortrait } = meta
 
@@ -1580,6 +1886,79 @@ function updateFroslassUI(data) {
   updateMirageUI(data)
 }
 
+// ── 누클라바스 UI ──────────────────────────────────────────────────
+function updateCatastroUI(data) {
+  if (data.boss_name !== "누클라바스") return
+  const state = data.boss_state ?? {}
+  const phase = state.phase ?? 1
+
+  // ── 부위 HP 패널 (2페이즈) ────────────────────────────────────
+  const partPanel = $("catastro-part-panel")
+  if (partPanel) {
+    partPanel.style.display = phase === 2 ? "block" : "none"
+    if (phase === 2) {
+      const partHp      = state.partHp      ?? { eye:500, wing:500, tail:500, claw:500 }
+      const partDestroy = state.partDestroyed ?? { eye:false, wing:false, tail:false, claw:false }
+      const PARTS = [
+        { id: "eye",  label: "눈"   },
+        { id: "wing", label: "날개" },
+        { id: "tail", label: "꼬리" },
+        { id: "claw", label: "발톱" },
+      ]
+      PARTS.forEach(({ id, label }) => {
+        const card = $(`part-card-${id}`)
+        const bar  = $(`part-hp-bar-${id}`)
+        const num  = $(`part-hp-num-${id}`)
+        if (!card) return
+        const hp    = partHp[id] ?? 500
+        const pct   = Math.max(0, hp / 500 * 100)
+        const dead  = partDestroy[id] ?? false
+        const shown = state.exposedPart === id
+
+        card.classList.toggle("part-exposed",   shown && !dead)
+        card.classList.toggle("part-destroyed", dead)
+
+        if (bar) {
+          bar.style.width           = `${dead ? 0 : pct}%`
+          bar.style.backgroundColor = pct > 50 ? "#4caf50" : pct > 20 ? "#ff9800" : "#f44336"
+        }
+        if (num) num.textContent = dead ? "파괴됨" : `${hp} / 500`
+      })
+    }
+  }
+
+  // ── 코어 HP 패널 (3페이즈) ────────────────────────────────────
+  const corePanel = $("catastro-core-panel")
+  if (corePanel) {
+    corePanel.style.display = phase === 3 ? "block" : "none"
+    if (phase === 3) {
+      const coreOrder = state.coreOrder ?? []
+      const coreIdx   = state.coreIndex  ?? 0
+      const currentId = coreOrder[coreIdx] ?? null
+      const coreData  = state.coreData?.[currentId]
+      const coreHpMap = state.coreHp ?? {}
+
+      const nameEl = $("core-name")
+      const bar    = $("core-hp-bar")
+      const num    = $("core-hp-num")
+      const cntEl  = $("core-destroyed-count")
+
+      if (nameEl) nameEl.textContent = coreData?.name ?? (currentId ? `${currentId} 코어` : "없음")
+      if (cntEl)  cntEl.textContent  = `${state.coresDestroyed ?? 0} / 6 파괴`
+
+      const curHp  = currentId ? (coreHpMap[currentId] ?? coreData?.hp ?? 300) : 0
+      const maxHp  = coreData?.hp ?? 300
+      const pct    = maxHp > 0 ? Math.max(0, curHp / maxHp * 100) : 0
+
+      if (bar) {
+        bar.style.width           = `${pct}%`
+        bar.style.backgroundColor = pct > 50 ? "#4caf50" : pct > 20 ? "#ff9800" : "#f44336"
+      }
+      if (num) num.textContent = currentId ? `${curHp} / ${maxHp}` : "-"
+    }
+  }
+}
+
 // ── [4] 화염구슬 전달 버튼 ─────────────────────────────────────────
 function updateFireballPassButton(data) {
   if (data.boss_name !== "눈여아") return
@@ -1790,7 +2169,9 @@ function applyRoomData(data) {
   PLAYER_SLOTS.forEach(s => updateSlotUI(s, data))
   updateBossUI(data)
   updateFroslassUI(data)
+  updateCatastroUI(data)
   updateBeedrillUI(data)
+  updateResonanceModal(data)
   updateOrderDisplay(data)
   updateTurnUI(data)
   if (!isSpectator) {

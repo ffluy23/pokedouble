@@ -21,6 +21,7 @@ import {
 import { recordMalamarMove } from "../lib/bosses/malamar.js"
 import { recordZoroarkHit } from "../lib/bosses/zoroark.js"
 import { isNinjaskPhase3Trigger, buildShedinjaTransition } from "../lib/bosses/ninjask.js"
+import { getPartLabel, getPartSlotKey, getCoreDestroyLog } from "../lib/bosses/catastrophe.js"
 
 
 const PLAYER_SLOTS = ["p1", "p2", "p3"]
@@ -28,6 +29,8 @@ const BEEDRILL_SLOTS = ["beedrill_0", "beedrill_1"]
 
 function isBeedrillSlot(slot) { return BEEDRILL_SLOTS.includes(slot) }
 function isBabySlot(slot) { return slot === "boss_baby" }
+function isPartSlot(slot) { return ["eye","wing","tail","claw"].includes(slot) }
+function isCoreSlot(slot) { return slot === "core" }
 function makeLog(type, text = "", meta = null) { return { type, text, ...(meta ? { meta } : {}) } }
 
 async function writeLogs(roomId, logEntries) {
@@ -570,6 +573,14 @@ function applyDamagesToPlayers(damages, entries, data, logEntries) {
       pkmn.bideState.damage = (pkmn.bideState.damage ?? 0) + dmg
       pkmn.bideState.lastAttackerSlot = "boss"
     }
+
+    // ── [누클라바스] 비극 역방향: 플레이어가 피해받으면 보스도 공유 ──
+    if (data.boss_name === "누클라바스" && data[`${slot}_tragedy`] && (data.boss_current_hp ?? 0) > 0) {
+      const sharedDmg = Math.max(1, Math.floor(dmg * 0.5))
+      data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - sharedDmg)
+      logEntries.push(makeLog("normal", `[비극]으로 누클라바스도 ${sharedDmg}의 피해를 공유받았다!`))
+      logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp ?? 1 }))
+    }
   }
 }
 
@@ -605,7 +616,14 @@ async function finishTurn(roomRef, roomId, data, entries, logEntries, extraUpdat
     boss_prophecyLastMoves:  data.boss_prophecyLastMoves  ?? {},
     _phase3Entered:          data._phase3Entered          ?? false,
     boss_last_attacker: data.boss_last_attacker ?? null,
-     boss_telekinesis: data.boss_telekinesis ?? 0, 
+    boss_telekinesis:   data.boss_telekinesis   ?? 0,
+    phase4StandChoice:  data.phase4StandChoice  ?? null,
+    ...Object.fromEntries(PLAYER_SLOTS.flatMap(s => [
+      [`${s}_ominous`,  data[`${s}_ominous`]  ?? false],
+      [`${s}_doomed`,   data[`${s}_doomed`]   ?? false],
+      [`${s}_collapse`, data[`${s}_collapse`] ?? false],
+      [`${s}_tragedy`,  data[`${s}_tragedy`]  ?? false],
+    ])),
     ...(data.boss_baby !== undefined ? { boss_baby: data.boss_baby } : {}),
   }
   PLAYER_SLOTS.forEach(s => {
@@ -885,10 +903,253 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: "감히 여왕을 건드리려고?" })
   }
 
-  const targetBeedrillSlots = tSlots.filter(s => isBeedrillSlot(s))
+ const targetBeedrillSlots = tSlots.filter(s => isBeedrillSlot(s))
   const targetBossOrPlayer  = tSlots.filter(s => !isBeedrillSlot(s))
   const isBeedrillTarget    = targetBeedrillSlots.length > 0
   const isAoeToBeedrills    = isAttackMove && (moveInfo?.aoe || moveInfo?.aoeEnemy) && anyBeedrillAlive(data)
+
+  // ── [누클라바스] 2페이즈: 부위 공격 ──────────────────────────────
+  const exposedPart = data.boss_state?.exposedPart ?? null
+  if (
+    data.boss_name === "누클라바스" &&
+    data.boss_state?.phase === 2 &&
+    exposedPart &&
+    isAttackMove
+  ) {
+    // 부위가 드러나있는 동안 플레이어 공격은 무조건 해당 부위로 리다이렉트
+    const partLabel  = getPartLabel(exposedPart)
+    const partHp     = data.boss_state.partHp ?? { eye:500, wing:500, tail:500, claw:500 }
+    const destroyed  = data.boss_state.partDestroyed ?? { eye:false, wing:false, tail:false, claw:false }
+
+    if (destroyed[exposedPart]) {
+      // 이미 파괴된 부위 — 공격 무효
+      logEntries.push(makeLog("normal", `${partLabel}은(는) 이미 파괴되었다!`))
+    } else {
+      // 명중 체크
+      const { hit } = calcHit(myPkmn, moveInfo, makeFakeBoss(data), data.weather ?? null)
+      if (!hit) {
+        logEntries.push(makeLog("normal", `${myPkmn.name}의 공격은 빗나갔다!`))
+      } else {
+        // 공격 로그 (특수 로그 랜덤 출력)
+        const HIT_LOGS = [
+          `${myPkmn.name}의 ${moveData.name}! 분명히 공격이 닿았어!`,
+          `${myPkmn.name}의 ${moveData.name}! 효과가 있는 것 같아!`,
+          `${myPkmn.name}의 ${moveData.name}! 아까와는 달라!`,
+          `${myPkmn.name}의 ${moveData.name}! 반응이 있다!`,
+        ]
+        logEntries.push(makeLog("normal", HIT_LOGS[Math.floor(Math.random() * HIT_LOGS.length)]))
+
+        // 데미지 계산 (fakeBoss 타입 무시하고 그냥 일반 계산)
+        const fakePart = {
+          type:    ["노말"],
+          defense: 0,
+          speed:   1,
+          ranks:   defaultRanks(),
+          hp:      partHp[exposedPart],
+          maxHp:   500,
+          name:    partLabel,
+          status:  null,
+        }
+        const powerOverride   = calcPowerOverride(moveInfo, myPkmn, fakePart)
+        const atkStatOverride = calcAtkStatOverride(moveInfo, myPkmn)
+        const { damage, dice } = calcDamage(myPkmn, moveData.name, fakePart, powerOverride, atkStatOverride, null, data.weather ?? null)
+        logEntries.push(makeLog("dice", "", { slot: mySlot, roll: dice }))
+
+        const finalDmg    = Math.max(1, damage)
+        const newPartHp   = { ...partHp }
+        newPartHp[exposedPart] = Math.max(0, newPartHp[exposedPart] - finalDmg)
+
+        logEntries.push(makeLog("part_hp", "", {
+          part:   exposedPart,
+          label:  partLabel,
+          hp:     newPartHp[exposedPart],
+          maxHp:  500,
+        }))
+
+        const newDestroyed = { ...destroyed }
+        if (newPartHp[exposedPart] <= 0) {
+          newDestroyed[exposedPart] = true
+          logEntries.push(makeLog("normal", `누클라바스의 ${partLabel}가 파괴되었다!`))
+
+          // 모든 부위 파괴 체크
+          const allDestroyed = Object.values(newDestroyed).every(v => v)
+          if (allDestroyed) {
+            // 2500 데미지
+            data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - 2500)
+            logEntries.push(makeLog("normal", "모든 부위가 파괴되었다! 누클라바스에게 막대한 데미지!"))
+            logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+            data.boss_state = {
+              ...data.boss_state,
+              partHp:           newPartHp,
+              partDestroyed:    newDestroyed,
+              allPartsDestroyed: true,
+              exposedPart:      null,
+            }
+          } else {
+            data.boss_state = {
+              ...data.boss_state,
+              partHp:        newPartHp,
+              partDestroyed: newDestroyed,
+            }
+          }
+        } else {
+          data.boss_state = {
+            ...data.boss_state,
+            partHp: newPartHp,
+          }
+        }
+
+        trackDealCheck(data, mySlot, finalDmg)
+      }
+    }
+
+    // 어시스트 해제
+    const assistUpdate2 = {}
+    if (isAssistCaster) {
+      assistUpdate2.assist_active       = false
+      assistUpdate2.assist_request_from = null
+      assistUpdate2.assist_used         = true
+    }
+    const result2 = await finishTurn(roomRef, roomId, data, entries, logEntries, {
+      boss_state: data.boss_state,
+      ...assistUpdate2,
+    })
+    return res.status(200).json({ ok: true, ...(result2 ? { result: result2 } : {}) })
+  }
+
+  // ── [누클라바스] 3페이즈: 코어 공격 ──────────────────────────────
+  if (
+    data.boss_name === "누클라바스" &&
+    data.boss_state?.phase === 3 &&
+    isAttackMove
+  ) {
+    const coreState    = data.boss_state
+    const coreOrder    = coreState.coreOrder ?? []
+    const coreIdx      = coreState.coreIndex  ?? 0
+    const currentCoreId = coreOrder[coreIdx]  ?? null
+    const coreData     = coreState.coreData?.[currentCoreId]
+
+    if (!currentCoreId || !coreData) {
+      logEntries.push(makeLog("normal", "공격할 코어가 없다!"))
+    } else {
+      const coreName  = coreData.name ?? `${currentCoreId} 코어`
+      const coreHpMap = { ...(coreState.coreHp ?? {}) }
+      const curHp     = coreHpMap[currentCoreId] ?? coreData.hp ?? 300
+
+      // 명중 체크
+      const fakeCoreTarget = {
+        type:    coreData.type ?? ["노말"],
+        defense: coreData.defense ?? 2,
+        speed:   coreData.speed   ?? 3,
+        ranks:   defaultRanks(),
+        hp:      curHp,
+        maxHp:   coreData.hp ?? 300,
+        name:    coreName,
+        status:  null,
+      }
+      const { hit, hitType } = calcHit(myPkmn, moveInfo, fakeCoreTarget, data.weather ?? null)
+
+      if (!hit) {
+        logEntries.push(makeLog("normal",
+          hitType === "evaded"
+            ? `${coreName}이 피했다!`
+            : `${myPkmn.name}의 공격은 빗나갔다!`
+        ))
+      } else {
+        const HIT_LOGS = [
+          `${myPkmn.name}의 ${moveData.name}! 분명히 공격이 닿았어!`,
+          `${myPkmn.name}의 ${moveData.name}! 효과가 있는 것 같아!`,
+          `${myPkmn.name}의 ${moveData.name}! 아까와는 달라!`,
+          `${myPkmn.name}의 ${moveData.name}! 반응이 있다!`,
+        ]
+        logEntries.push(makeLog("normal", HIT_LOGS[Math.floor(Math.random() * HIT_LOGS.length)]))
+
+        const powerOverride   = calcPowerOverride(moveInfo, myPkmn, fakeCoreTarget)
+        const atkStatOverride = calcAtkStatOverride(moveInfo, myPkmn)
+        const { damage, multiplier, critical, dice } = calcDamage(
+          myPkmn, moveData.name, fakeCoreTarget,
+          powerOverride, atkStatOverride, null, data.weather ?? null
+        )
+        logEntries.push(makeLog("dice", "", { slot: mySlot, roll: dice }))
+
+        if (multiplier === 0) {
+          logEntries.push(makeLog("normal", `${coreName}에게는 효과가 없다…`))
+        } else {
+          let finalDmg = Math.max(1, damage)
+          if (isAssistCaster) finalDmg = Math.floor(finalDmg * 1.15)
+          finalDmg = applyDmgMultipliers(finalDmg, moveInfo, moveData.name, myPkmn, null, data.boss_current_hp ?? 0, data.boss_max_hp ?? 1, logEntries)
+          finalDmg = Math.max(1, finalDmg)
+
+          if (multiplier > 1) logEntries.push(makeLog("after_hit", "효과가 굉장했다!"))
+          if (multiplier < 1) logEntries.push(makeLog("after_hit", "효과가 별로인 듯하다…"))
+          if (critical)       logEntries.push(makeLog("after_hit", "급소에 맞았다!"))
+
+          const newCoreHp = Math.max(0, curHp - finalDmg)
+          coreHpMap[currentCoreId] = newCoreHp
+
+          logEntries.push(makeLog("core_hp", "", {
+            coreId: currentCoreId,
+            name:   coreName,
+            hp:     newCoreHp,
+            maxHp:  coreData.hp ?? 300,
+          }))
+
+          let newCoreIdx      = coreIdx
+          let coresDestroyed  = coreState.coresDestroyed ?? 0
+          let newBossState    = { ...coreState, coreHp: coreHpMap }
+
+          if (newCoreHp <= 0) {
+            // 코어 파괴
+            logEntries.push(makeLog("normal", getCoreDestroyLog(coreName)))
+            coresDestroyed++
+
+            // 본체 700 데미지
+            data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - 700)
+            logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+
+            newCoreIdx = coreIdx + 1
+            const nextCoreId = coreOrder[newCoreIdx] ?? null
+
+            if (nextCoreId) {
+              const nextCoreName = coreState.coreData?.[nextCoreId]?.name ?? `${nextCoreId} 코어`
+              logEntries.push(makeLog("normal", `누클라바스는 자세를 틀어 ${coreName}를 감춘다!`))
+              logEntries.push(makeLog("normal", `${nextCoreName}가 드러났다!`))
+            } else {
+              // 모든 코어 파괴 → 추가 700 데미지
+              data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - 700)
+              logEntries.push(makeLog("normal", "모든 코어가 파괴되었다!"))
+              logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
+            }
+
+            newBossState = {
+              ...newBossState,
+              coreIndex:      newCoreIdx,
+              coresDestroyed,
+            }
+          }
+
+          data.boss_state = newBossState
+          trackDealCheck(data, mySlot, finalDmg)
+
+          if (data.boss_current_hp <= 0) {
+            logEntries.push(makeLog("faint", `누클라바스는 쓰러졌다!`, { slot: "boss" }))
+          }
+        }
+      }
+    }
+
+    const assistUpdate3 = {}
+    if (isAssistCaster) {
+      assistUpdate3.assist_active       = false
+      assistUpdate3.assist_request_from = null
+      assistUpdate3.assist_used         = true
+    }
+    const result3 = await finishTurn(roomRef, roomId, data, entries, logEntries, {
+      boss_state: data.boss_state,
+      ...assistUpdate3,
+    })
+    return res.status(200).json({ ok: true, ...(result3 ? { result: result3 } : {}) })
+  }
 
   const assistActive   = data.assist_active ?? false
   const assistFrom     = data.assist_request_from ?? null
@@ -1650,14 +1911,56 @@ myPkmn.roostTurns = 2
 
                   finalDmg = applyDmgMultipliers(finalDmg, moveInfo, moveData.name, myPkmn, data.boss_status ?? null, data.boss_current_hp ?? 0, data.boss_max_hp ?? 1, logEntries)
                   finalDmg = Math.max(1, finalDmg)
-                  if (data.boss_state?.isShedinja) {
+                if (data.boss_name === "누클라바스" && (data.boss_state?.phase ?? 1) === 1) {
+                    // 1페이즈: boss_current_hp 안 깎고 누적 딜만 기록
+                    data.boss_state = {
+                      ...(data.boss_state ?? {}),
+                      totalDmgTaken: (data.boss_state?.totalDmgTaken ?? 0) + finalDmg,
+                    }
+                  } else if (data.boss_state?.isShedinja) {
                     logEntries.push(makeLog("normal", "공격이 스쳐 지나간다... 아무것도 닿지 않는다."))
                   } else {
                     data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - finalDmg)
-                    // ── [추가] 누리레느 딜체크 누적 ──────────────
-                    //조로아크 딜체크 추적
                     trackDealCheck(data, mySlot, finalDmg)
+
+                    // ── [누클라바스] 4페이즈 딜 누적 ──────────────
+                    if (data.boss_name === "누클라바스" && (data.boss_state?.phase ?? 1) === 4) {
+                      data.boss_state = {
+                        ...(data.boss_state ?? {}),
+                        phase4TotalDmg: (data.boss_state?.phase4TotalDmg ?? 0) + finalDmg,
+                      }
+                      // 딜 윈도우 기록 (전기 코어 2라운드 딜 체크)
+                      if (data.boss_state?.phase4DmgWindowOn) {
+                        const win = { ...(data.boss_state.phase4DmgWindow ?? {}) }
+                        win[mySlot] = (win[mySlot] ?? 0) + finalDmg
+                        data.boss_state = { ...data.boss_state, phase4DmgWindow: win }
+                      }
+                    }
+
+                    // ── [누클라바스] 비극 피해 공유 ──────────────
+                    if (data.boss_name === "누클라바스") {
+                      const tragedySlot = PLAYER_SLOTS.find(s => data[`${s}_tragedy`])
+                      if (tragedySlot) {
+                        const tIdx  = data[`${tragedySlot}_active_idx`] ?? 0
+                        const tPkmn = entries[tragedySlot]?.[tIdx]
+                        if (tPkmn && tPkmn.hp > 0) {
+                          const sharedDmg = Math.max(1, Math.floor(finalDmg * 0.5))
+                          if (tPkmn.enduring && sharedDmg >= tPkmn.hp) {
+                            tPkmn.hp = 1; tPkmn.enduring = false
+                            logEntries.push(makeLog("after_hit", `${tPkmn.name}은(는) 버텼다!`))
+                          } else {
+                            tPkmn.hp = Math.max(0, tPkmn.hp - sharedDmg)
+                          }
+                          tPkmn.tookDamageLastTurn = true
+                          logEntries.push(makeLog("normal", `[비극]으로 ${tPkmn.name}에게도 피해가 공유되었다! (${sharedDmg})`))
+                          logEntries.push(makeLog("hit", "", { defender: tragedySlot }))
+                          logEntries.push(makeLog("hp",  "", { slot: tragedySlot, hp: tPkmn.hp, maxHp: tPkmn.maxHp }))
+                          if (tPkmn.hp <= 0) logEntries.push(makeLog("faint", `${tPkmn.name}은(는) 쓰러졌다!`, { slot: tragedySlot }))
+                        }
+                      }
+                    }
                   }
+                  
                   recordZoroarkHit(mySlot, finalDmg, data)
                   // ── 마폭시 예언 추적 ──────────────────────────
                   trackProphecyData(mySlot, moveData.name, !!(moveInfo?.power > 0), finalDmg, data)
