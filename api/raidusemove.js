@@ -72,10 +72,11 @@ function getBaseStat(pokemon, key) {
 // ════════════════════════════════════════════════════════════════════
 function checkRaidWin(entries, bossHp, data = null) {
   if (bossHp <= 0) return "victory"
-  const slots = data ? (data.active_slots ?? {}) : null
-
-  const activeSlotList = slots
-    ? PLAYER_SLOTS.filter(s => slots[s] != null)
+  const activeSlots = data?.active_slots ?? {}
+  const hasActiveSlots = Object.values(activeSlots).some(uid => !!uid)
+  
+  const activeSlotList = hasActiveSlots
+    ? PLAYER_SLOTS.filter(s => activeSlots[s] != null)
     : PLAYER_SLOTS
 
   if (activeSlotList.length === 0) return "defeat"
