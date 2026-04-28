@@ -2890,21 +2890,7 @@ async function showResonanceWhiteFade() {
   // 이후 게임 종료는 roomRef onSnapshot이 처리
 }
 
-function updateChatSectionByStatus() {
-  const chatSection      = document.getElementById("chat-section")
-  const spectatorSection = document.getElementById("spectator-chat-section")
-  if (!chatSection || !spectatorSection) return
 
-  const isNowSpectator = isSpectator || myRosterStatus === "spectator" || myRosterStatus === "bench"
-
-  if (isNowSpectator) {
-    chatSection.style.display      = "none"
-    spectatorSection.style.display = "flex"
-  } else {
-    chatSection.style.display      = "flex"
-    spectatorSection.style.display = "none"
-  }
-}
 
 window.__doRequestAssist = doRequestAssist
 window.__doAgreeAssist   = doAgreeAssist
