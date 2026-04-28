@@ -64,8 +64,26 @@ export default async function handler(req, res) {
   }
 
   // ── 2. inUid 처리: 슬롯에 투입 ───────────────────────────────
-  const inMember = roster[inUid]
-  if (!inMember) return res.status(404).json({ error: "투입 대상 없음" })
+ let inMember = roster[inUid]
+
+if (!inMember) {
+  const spectators = data.spectators ?? []
+  const spectatorNames = data.spectator_names ?? []
+  const spectIdx = spectators.indexOf(inUid)
+  if (spectIdx === -1) return res.status(404).json({ error: "투입 대상 없음" })
+  
+  inMember = {
+    status: "spectator",
+    nick: spectatorNames[spectIdx] ?? inUid.slice(0, 6),
+    entry: [],
+    active_idx: 0,
+  }
+  // roster에도 등록해줘야 나중에 교체 등 처리 가능
+  update[`roster.${inUid}`] = {
+    ...inMember,
+    status: "active",
+  }
+}
 
   // 이미 다른 슬롯에 출전 중이면 거부
   const alreadySlot = Object.entries(activeSlots).find(([, uid]) => uid === inUid)?.[0]

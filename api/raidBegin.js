@@ -78,6 +78,25 @@ if (!allEntryReady) return res.status(400).json({ error: "entry 미완료 (타�
       bossState = { phase1Step: "bite", repeatLeft: 0 }
     }
 
+    // ── roster / active_slots 생성 ───────────────────────────────
+    const roster = {}
+    const activeSlots = {}
+
+    PLAYER_SLOTS.forEach((fsSlot, i) => {
+      const legacySlot = `player${i + 1}`
+      const uid  = data[`${legacySlot}_uid`]
+      const nick = data[`${legacySlot}_name`] ?? uid?.slice(0, 6) ?? "?"
+      if (uid) {
+        roster[uid] = { status: "active", nick, role: i === 0 ? "admin" : null }
+        activeSlots[fsSlot] = uid
+      }
+    })
+
+    ;(data.spectators ?? []).forEach((uid, i) => {
+      const nick = (data.spectator_names ?? [])[i] ?? uid.slice(0, 6)
+      roster[uid] = { status: "spectator", nick, role: null }
+    })
+
     // ── Firestore 업데이트 ───────────────────────────────────────
     await roomRef.update({
       boss_name:       bossData.boss_name ?? bossId,
@@ -102,6 +121,8 @@ if (!allEntryReady) return res.status(400).json({ error: "entry 미완료 (타�
       round_count:     0,
       turn_count:      0,
       current_order:   [],
+      roster,
+      active_slots: activeSlots,
     })
 
     return res.status(200).json({ ok: true })
