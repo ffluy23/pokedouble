@@ -964,6 +964,14 @@ export default async function handler(req, res) {
   const tSlots = targetSlots ?? []
   const moveInfo = moves[moveData.name] ?? null
   const isAttackMove = !!(moveInfo?.power)
+
+    const assistActive   = data.assist_active ?? false
+  const assistFrom     = data.assist_request_from ?? null
+  const isAssistCaster = assistActive && assistFrom === mySlot
+
+  const logEntries = []
+
+  
   if (isAttackMove && anyBeedrillAlive(data)) {
     const isAoe = !!(moveInfo?.aoe || moveInfo?.aoeEnemy)
     const isAllyOnlyTarget = tSlots.length > 0 && tSlots.every(s => PLAYER_SLOTS.includes(s))
@@ -1206,11 +1214,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, ...(result3 ? { result: result3 } : {}) })
   }
 
-  const assistActive   = data.assist_active ?? false
-  const assistFrom     = data.assist_request_from ?? null
-  const isAssistCaster = assistActive && assistFrom === mySlot
 
-  const logEntries = []
 
   tickVolatiles(myPkmn).forEach(m => logEntries.push(makeLog("normal", m)))
 
