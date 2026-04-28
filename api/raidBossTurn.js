@@ -299,12 +299,12 @@ export default async function handler(req, res) {
 
     // 보스 상태이상 EOT (독/화상)
     if (data.boss_status === "독") {
-      const dmg = Math.max(1, Math.floor((data.boss_max_hp ?? 1) / 216))
+      const dmg = Math.max(1, Math.floor((data.boss_max_hp ?? 1) / 500))
       data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - dmg)
       logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 독 데미지로 ${dmg} HP를 잃었다!`))
       logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
     } else if (data.boss_status === "화상") {
-      const dmg = Math.max(1, Math.floor((data.boss_max_hp ?? 1) / 216))
+      const dmg = Math.max(1, Math.floor((data.boss_max_hp ?? 1) / 500))
       data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - dmg)
       logEntries.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 화상 데미지로 ${dmg} HP를 잃었다!`))
       logEntries.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))

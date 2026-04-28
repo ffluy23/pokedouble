@@ -802,7 +802,7 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
     if (!seederSlot || !PLAYER_SLOTS.includes(seederSlot)) continue
     const sIdx  = data[`${seederSlot}_active_idx`] ?? 0
     const sPkmn = entries[seederSlot]?.[sIdx]
-    const dmg = Math.max(1, Math.floor((tPkmn.maxHp ?? tPkmn.hp) / 216))
+    const dmg = Math.max(1, Math.floor((tPkmn.maxHp ?? tPkmn.hp) / 500))
     tPkmn.hp = Math.max(0, tPkmn.hp - dmg)
     eotLogs.push(makeLog("normal", `씨뿌리기가 ${tPkmn.name}${josa(tPkmn.name, "의")} 체력을 빼앗는다!`))
     eotLogs.push(makeLog("hp", "", { slot: tSlot, hp: tPkmn.hp, maxHp: tPkmn.maxHp }))
@@ -820,7 +820,7 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
   }
 
   if ((data.boss_volatile?.cursed) && (data.boss_current_hp ?? 0) > 0) {
-    const dmg = Math.max(1, Math.floor((data.boss_max_hp ?? 1) / 216))
+    const dmg = Math.max(1, Math.floor((data.boss_max_hp ?? 1) / 500))
     data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - dmg)
     eotLogs.push(makeLog("normal", `${bossName}${josa(bossName, "은는")} 저주 때문에 ${dmg} 데미지를 입었다!`))
     eotLogs.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
@@ -829,7 +829,7 @@ async function handleRaidEot(roomRef, roomId, data, entries, update, logEntries)
 
   if (data.boss_seeded && (data.boss_current_hp ?? 0) > 0) {
     const seederSlot = data.boss_seeder
-    const dmg = Math.max(1, Math.floor((data.boss_max_hp ?? 1) / 216))
+    const dmg = Math.max(1, Math.floor((data.boss_max_hp ?? 1) / 500))
     data.boss_current_hp = Math.max(0, (data.boss_current_hp ?? 0) - dmg)
     eotLogs.push(makeLog("normal", `씨뿌리기가 ${bossName}${josa(bossName, "의")} 체력을 빼앗는다!`))
     eotLogs.push(makeLog("hp", "", { slot: "boss", hp: data.boss_current_hp, maxHp: data.boss_max_hp }))
