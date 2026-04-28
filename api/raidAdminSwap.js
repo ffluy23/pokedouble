@@ -1,9 +1,5 @@
-// api/raidAdminSwap.js
-// Admin 전용 — 레이드 중 슬롯 교체 (출전 ↔ 대기/관전)
-
 import { db } from "../lib/firestore.js"
 import { corsHeaders } from "../lib/gameUtils.js"
-import { hydrateSlotData, dehydrateSlotData } from "../lib/raidBossAction.js"
 
 const PLAYER_SLOTS = ["p1", "p2", "p3"]
 
@@ -12,9 +8,6 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end()
   if (req.method !== "POST")   return res.status(405).end()
 
-  // outUid: 빠지는 사람 (null이면 빈 슬롯에 투입)
-  // inUid:  들어오는 사람
-  // targetSlot: "p1" | "p2" | "p3"
   const { roomId, outUid, inUid, targetSlot } = req.body
   if (!roomId || !inUid || !targetSlot)
     return res.status(400).json({ error: "파라미터 부족" })
@@ -24,110 +17,98 @@ export default async function handler(req, res) {
   const roomRef = db.collection("raid").doc(roomId)
   const snap    = await roomRef.get()
   const data    = snap.data()
-  if (!data) return res.status(404).json({ error: "방 없음" })
+  if (!data)         return res.status(404).json({ error: "방 없음" })
   if (data.game_over) return res.status(403).json({ error: "게임 종료됨" })
 
-  // ── admin 확인 ─────────────────────────────────────────────────
-  // roster에 role: "admin" 이 있는 사람만 가능
-  const roster = data.roster ?? {}
-  const isAdmin = Object.values(roster).some(m => m.role === "admin")
-  // 실제로 요청자가 admin인지 확인하려면 inUid 대신 adminUid를 따로 받아야 하지만
-  // 현재 구조상 roster에 admin이 있으면 허용 (클라이언트에서 버튼 노출 제한으로 보완)
-  // 더 엄격하게 하려면 req.body에 adminUid 추가하면 됨
-
+  const roster      = data.roster      ?? {}
   const activeSlots = { ...(data.active_slots ?? {}) }
   const update      = {}
 
-  // ── 1. outUid 처리: 현재 슬롯에서 빼기 ──────────────────────
+  // ── 1. outUid: 현재 슬롯에서 빼고 roster에 백업 ──────────────
   if (outUid) {
-  const outMember = roster[outUid] ?? {}
-
     // active_slots에서 제거
-    if (activeSlots[targetSlot] === outUid) {
-      activeSlots[targetSlot] = null
-    }
+    activeSlots[targetSlot] = null
 
-    // roster status → bench
-    update[`roster.${outUid}.status`] = "bench"
+    // 슬롯의 현재 배틀 데이터를 roster에 백업
+    const outEntry     = data[`${targetSlot}_entry`]     ?? []
+    const outActiveIdx = data[`${targetSlot}_active_idx`] ?? 0
 
-    // 출전 중이던 entry / active_idx를 roster에 백업
-    // (나중에 다시 투입될 때 복원 가능하도록)
-    const outEntry    = data[`${targetSlot}_entry`]    ?? outMember.entry    ?? []
-    const outActiveIdx = data[`${targetSlot}_active_idx`] ?? outMember.active_idx ?? 0
+    update[`roster.${outUid}.status`]     = "bench"
     update[`roster.${outUid}.entry`]      = outEntry
     update[`roster.${outUid}.active_idx`] = outActiveIdx
 
-    // 슬롯 entry 초기화 (빈 슬롯)
-    update[`${targetSlot}_entry`]     = []
+    // 슬롯 초기화
+    update[`${targetSlot}_entry`]      = []
     update[`${targetSlot}_active_idx`] = 0
   }
 
-  // ── 2. inUid 처리: 슬롯에 투입 ───────────────────────────────
- let inMember = roster[inUid]
-
-if (!inMember) {
-  const spectators = data.spectators ?? []
-  const spectatorNames = data.spectator_names ?? []
-  const spectIdx = spectators.indexOf(inUid)
-  if (spectIdx === -1) return res.status(404).json({ error: "투입 대상 없음" })
-
-  // users에서 entry 미리 로드
-  const userSnap = await db.collection("users").doc(inUid).get()
-  const rawEntry = userSnap.data()?.entry ?? []
-  const freshEntry = rawEntry.map(p => ({ ...p, maxHp: p.hp }))
-
-  inMember = {
-    status: "spectator",
-    nick: spectatorNames[spectIdx] ?? inUid.slice(0, 6),
-    entry: freshEntry,
-    active_idx: 0,
-  }
-  update[`roster.${inUid}`] = {
-    ...inMember,
-    status: "active",
-  }
-}
-
+  // ── 2. inUid: 슬롯에 투입 ────────────────────────────────────
   // 이미 다른 슬롯에 출전 중이면 거부
   const alreadySlot = Object.entries(activeSlots).find(([, uid]) => uid === inUid)?.[0]
   if (alreadySlot && alreadySlot !== targetSlot)
     return res.status(403).json({ error: `이미 ${alreadySlot}에 출전 중` })
 
-  activeSlots[targetSlot] = inUid
+  // inMember 확정 (roster에 없으면 spectators 배열에서 찾기)
+  let inMember   = roster[inUid] ?? null
+  let inNick     = inMember?.nick ?? null
 
-  // roster status → active
-  update[`roster.${inUid}.status`] = "active"
+  if (!inMember) {
+    const spectators  = data.spectators      ?? []
+    const spectNames  = data.spectator_names ?? []
+    const spectIdx    = spectators.indexOf(inUid)
+    if (spectIdx === -1) return res.status(404).json({ error: "투입 대상 없음" })
+    inNick = spectNames[spectIdx] ?? inUid.slice(0, 6)
+  }
 
-  // roster에 저장된 entry 복원 (없으면 초기 entry 사용)
- // 변경 후
-let inEntry, inActiveIdx
+  // entry 결정: roster 백업 → users 컬렉션 순서로
+  let inEntry, inActiveIdx
 
-if (inMember.entry && inMember.entry.length > 0) {
-  // roster에 백업된 배틀 중 데이터 있으면 그걸 씀
-  inEntry     = inMember.entry
-  inActiveIdx = inMember.active_idx ?? 0
-} else {
-  // 처음 투입 (백업 없음) → users에서 초기 엔트리 가져옴
-  const userSnap = await db.collection("users").doc(inUid).get()
-  const rawEntry = userSnap.data()?.entry ?? []
-  inEntry     = rawEntry.map(p => ({ ...p, maxHp: p.hp }))
-  inActiveIdx = 0
-}
-  update[`${targetSlot}_entry`]      = inEntry
-  update[`${targetSlot}_active_idx`] = inActiveIdx
+  const hasBackup = inMember?.entry && inMember.entry.length > 0
+  if (hasBackup) {
+    // 이전에 배틀 중이었던 데이터 복원 (HP/PP 유지)
+    inEntry     = inMember.entry
+    inActiveIdx = inMember.active_idx ?? 0
+  } else {
+    // 처음 투입 또는 백업 없음 → users에서 로드
+    const userSnap = await db.collection("users").doc(inUid).get()
+    const userData = userSnap.data()
+    if (!userData?.entry?.length)
+      return res.status(404).json({ error: "유저 엔트리 없음" })
 
-  // ── 3. active_slots 저장 ─────────────────────────────────────
-  update.active_slots = activeSlots
+    inEntry = userData.entry.map(p => ({
+      ...p,
+      maxHp:  p.hp,
+      moves:  (p.moves ?? []).map(m => ({ ...m })),
+    }))
+    inActiveIdx = 0
+  }
 
-  // ── 4. player_name 동기화 ────────────────────────────────────
-  // slotKey: p1 → player1_name 등
+  // roster 등록/갱신
+  if (!inMember) {
+    // spectator에서 처음 투입 → roster에 신규 등록
+    update[`roster.${inUid}`] = {
+      nick:       inNick,
+      role:       null,
+      status:     "active",
+      entry:      inEntry,
+      active_idx: inActiveIdx,
+    }
+  } else {
+    update[`roster.${inUid}.status`]     = "active"
+    update[`roster.${inUid}.entry`]      = inEntry
+    update[`roster.${inUid}.active_idx`] = inActiveIdx
+  }
+
+  // 슬롯 데이터 기록
+  activeSlots[targetSlot]                = inUid
+  update[`${targetSlot}_entry`]          = inEntry
+  update[`${targetSlot}_active_idx`]     = inActiveIdx
+  update.active_slots                    = activeSlots
+
+  // player_name 동기화
   const slotKey = targetSlot.replace("p", "player")
-  update[`${slotKey}_name`] = inMember.nick ?? inUid.slice(0, 6)
-
-  // ── 5. current_order에서 교체된 슬롯이 진행 중이면 처리 ──────
-  // (턴 중간 교체이므로 outUid 슬롯의 턴은 스킵하지 않음 — 다음 라운드부터 반영)
+  update[`${slotKey}_name`] = inNick ?? inUid.slice(0, 6)
 
   await roomRef.update(update)
-
   return res.status(200).json({ ok: true })
 }

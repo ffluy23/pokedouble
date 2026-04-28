@@ -171,6 +171,7 @@ function slotToPrefix(slot) {
 //  active_slots에서 myUid를 찾아 p1/p2/p3 반환
 //  없으면 roster에서 status 확인 → bench/spectator
 // ════════════════════════════════════════════════════════════════════
+// 변경 후
 function resolveMySlotAndStatus(data, uid) {
   // 1. active_slots에서 찾기
   const activeSlots = data.active_slots ?? {}
@@ -180,7 +181,14 @@ function resolveMySlotAndStatus(data, uid) {
 
   // 2. roster에서 찾기
   const member = (data.roster ?? {})[uid]
-  if (member) return { slot: null, status: member.status ?? "spectator" }
+  if (member) {
+    // bench도 마지막으로 있던 슬롯 복원 시도
+    if (member.status === "bench") {
+      // active_slots 히스토리에서 못 찾으면 null — UI는 roster entry 직접 참조
+      return { slot: null, status: "bench", rosterEntry: member.entry ?? [], rosterActiveIdx: member.active_idx ?? 0 }
+    }
+    return { slot: null, status: member.status ?? "spectator" }
+  }
 
   // 3. 레거시: player_uid 필드 (이전 구조 호환)
   for (const s of PLAYER_SLOTS) {
@@ -1280,10 +1288,15 @@ function deactivateIllusionUI(data) {
 // ── 기술 버튼 ────────────────────────────────────────────────────────
 function updateMoveButtons(data) {
   // [40인] bench 플레이어는 버튼 전체 비활성화
-  const isBenchPlayer = myRosterStatus === "bench"
+ const isBenchPlayer = myRosterStatus === "bench"
 
-  const myActiveIdx = data[`${mySlot}_active_idx`] ?? 0
-  const myPokemon   = data[`${mySlot}_entry`]?.[myActiveIdx]
+  const myActiveIdx = isBenchPlayer
+    ? (data.roster?.[myUid]?.active_idx ?? 0)
+    : (data[`${mySlot}_active_idx`] ?? 0)
+  const myEntry_    = isBenchPlayer
+    ? (data.roster?.[myUid]?.entry ?? [])
+    : (data[`${mySlot}_entry`] ?? [])
+  const myPokemon   = myEntry_[myActiveIdx]
   const fainted     = !myPokemon || myPokemon.hp <= 0
   const movesArr    = myPokemon?.moves ?? []
   const chainBound  = myPokemon?.chainBound ?? null
@@ -1680,9 +1693,13 @@ function updateBenchButtons(data) {
   if (!bench) return
   bench.innerHTML = ""
   // [40인] bench 플레이어는 교체 불가
-  if (myRosterStatus === "bench") return
-  const myEntry      = data[`${mySlot}_entry`] ?? []
-  const activeIdx    = data[`${mySlot}_active_idx`] ?? 0
+ const isBench      = myRosterStatus === "bench"
+  const myEntry      = isBench
+    ? (data.roster?.[myUid]?.entry ?? [])
+    : (data[`${mySlot}_entry`] ?? [])
+  const activeIdx    = isBench
+    ? (data.roster?.[myUid]?.active_idx ?? 0)
+    : (data[`${mySlot}_active_idx`] ?? 0)
   const myActivePkmn = myEntry[activeIdx]
   const isFainted    = !myActivePkmn || myActivePkmn.hp <= 0
   const forceSwitch  = !!data[`force_switch_${mySlot}`]
@@ -2388,7 +2405,35 @@ playBgm(bossPhase)
     updateSyncUI(data)
     updateBagButton(data)
   } else if (myRosterStatus === "bench") {
-    // bench: 버튼만 비활성화 표시
+    // bench: roster 엔트리로 UI 표시, 버튼 비활성화
+    const benchEntry     = data.roster?.[myUid]?.entry ?? []
+    const benchActiveIdx = data.roster?.[myUid]?.active_idx ?? 0
+    const benchPkmn      = benchEntry[benchActiveIdx]
+
+    // 포트레이트 / HP 카드 직접 업데이트
+    const nameEl = document.getElementById("my-active-name")
+    const hpEl   = document.getElementById("my-active-hp")
+    if (nameEl) nameEl.innerText = benchPkmn?.name ?? "-"
+    if (benchPkmn) {
+      updateHpBar("my-hp-bar", "my-active-hp", benchPkmn.hp, benchPkmn.maxHp, true)
+      updatePortrait("my", benchPkmn)
+    }
+
+    // 벤치 포켓몬도 표시
+    const bench = document.getElementById("bench-container")
+    if (bench) {
+      bench.innerHTML = ""
+      benchEntry.forEach((pkmn, idx) => {
+        if (idx === benchActiveIdx) return
+        const btn = document.createElement("button")
+        btn.innerHTML = pkmn.hp <= 0
+          ? `<span class="bench-name">${pkmn.name}</span><span class="bench-hp">기절</span>`
+          : `<span class="bench-name">${pkmn.name}</span><span class="bench-hp">HP: ${pkmn.hp}/${pkmn.maxHp}</span>`
+        btn.disabled = true
+        bench.appendChild(btn)
+      })
+    }
+
     updateMoveButtons(data)
     updateBagButton(data)
   }
