@@ -242,6 +242,10 @@ function updateSlotUI(slot, data) {
     const nameEl = $(`${prefix}-active-name`)
     if (nameEl) nameEl.innerText = "-"
     updateHpBar(`${prefix}-hp-bar`, `${prefix}-active-hp`, 0, 1, false)
+    const img = $(`${prefix}-portrait`)
+    const ph  = $(`${prefix}-portrait-placeholder`)
+    if (img) { img.classList.remove("visible"); img.style.display = "none"; img.dataset.loadedSrc = "" }
+    if (ph)  { ph.style.display = "block" }
     return
   }
 
