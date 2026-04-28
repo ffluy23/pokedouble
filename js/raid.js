@@ -2297,9 +2297,18 @@ function renderAdminSwapPanel(data, isAdmin) {
   panel.appendChild(slotGrid)
 
   // 대기열 목록
-  const benchList = Object.entries(roster)
-    .filter(([uid, m]) => m.status === "bench" || m.status === "spectator")
-    .sort((a, b) => (a[1].joinedAt ?? 0) - (b[1].joinedAt ?? 0))
+  const spectatorUids  = data.spectators      ?? []
+const spectatorNames = data.spectator_names ?? []
+
+const rosterList = Object.entries(roster)
+  .filter(([, m]) => m.status === "bench" || m.status === "spectator")
+
+const spectatorList = spectatorUids
+  .filter(uid => !roster[uid])
+  .map((uid, i) => [uid, { status: "spectator", nick: spectatorNames[i] ?? uid.slice(0, 6) }])
+
+const benchList = [...rosterList, ...spectatorList]
+  .sort((a, b) => (a[1].joinedAt ?? 0) - (b[1].joinedAt ?? 0))
 
   if (benchList.length === 0) {
     const empty = document.createElement("div")
