@@ -96,8 +96,20 @@ if (!inMember) {
   update[`roster.${inUid}.status`] = "active"
 
   // roster에 저장된 entry 복원 (없으면 초기 entry 사용)
-  const inEntry     = inMember.entry     ?? data[`${targetSlot}_entry`] ?? []
-  const inActiveIdx = inMember.active_idx ?? 0
+ // 변경 후
+let inEntry, inActiveIdx
+
+if (inMember.entry && inMember.entry.length > 0) {
+  // roster에 백업된 배틀 중 데이터 있으면 그걸 씀
+  inEntry     = inMember.entry
+  inActiveIdx = inMember.active_idx ?? 0
+} else {
+  // 처음 투입 (백업 없음) → users에서 초기 엔트리 가져옴
+  const userSnap = await db.collection("users").doc(inUid).get()
+  const rawEntry = userSnap.data()?.entry ?? []
+  inEntry     = rawEntry.map(p => ({ ...p, maxHp: p.hp }))
+  inActiveIdx = 0
+}
   update[`${targetSlot}_entry`]      = inEntry
   update[`${targetSlot}_active_idx`] = inActiveIdx
 

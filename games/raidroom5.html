@@ -481,6 +481,63 @@ body {
 }
 #leaveBtn:hover { background: #e74c3c; }
 
+/* ── 어드민 교체 패널 (게임 중) ── */
+#admin-swap-panel {
+  display: none;
+  margin-top: 8px;
+  border: 1px solid rgba(155,89,182,0.45);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(155,89,182,0.06);
+  font-size: 12px;
+}
+#admin-swap-panel.visible { display: block; }
+
+.admin-swap-title {
+  font-size: 11px; font-weight: 700;
+  color: #9b59b6; letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.admin-swap-label {
+  font-size: 10px; color: #aaa;
+  margin: 8px 0 4px;
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+.admin-swap-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.admin-swap-btn {
+  display: flex; flex-direction: column; align-items: flex-start;
+  padding: 7px 9px;
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.5);
+  cursor: pointer; transition: 0.15s;
+  color: #333; font-family: inherit; text-align: left;
+}
+.admin-swap-btn:hover       { border-color: #9b59b6; background: rgba(155,89,182,0.1); }
+.admin-swap-btn.selected    { border-color: #9b59b6; background: rgba(155,89,182,0.18); }
+.admin-swap-btn.empty       { opacity: 0.35; cursor: default; pointer-events: none; }
+.admin-swap-sublabel { font-size: 10px; color: #999; margin-bottom: 2px; }
+.admin-swap-name     { font-size: 12px; color: #222; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+#admin-swap-hint {
+  font-size: 11px; color: #e67e22;
+  min-height: 14px; margin: 6px 0 4px;
+}
+#admin-swap-confirm {
+  width: 100%; padding: 7px;
+  border: none; border-radius: 8px;
+  background: #9b59b6; color: #fff;
+  font-family: inherit; font-size: 12px; font-weight: 700;
+  cursor: pointer; transition: background 0.15s;
+  margin-top: 4px;
+}
+#admin-swap-confirm:hover    { background: #8e44ad; }
+#admin-swap-confirm:disabled { background: rgba(155,89,182,0.3); cursor: not-allowed; }
+
 /* 볼륨 */
 #volume-control { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
 
@@ -806,6 +863,21 @@ body {
                 <div id="bench-container"></div>
               </div>
               <button id="leaveBtn">방 나가기</button>
+
+              <!-- ══ 어드민: 게임 중 슬롯 교체 패널 ══ -->
+              <div id="admin-swap-panel">
+                <div class="admin-swap-title">🔧 ADMIN — 슬롯 교체</div>
+
+                <div class="admin-swap-label">① 비울 슬롯</div>
+                <div class="admin-swap-grid" id="admin-out-grid"></div>
+
+                <div class="admin-swap-label">② 투입할 관전자</div>
+                <div class="admin-swap-grid" id="admin-in-grid"></div>
+
+                <div id="admin-swap-hint">슬롯과 투입 대상을 선택하세요</div>
+                <button id="admin-swap-confirm" disabled>교체 실행</button>
+              </div>
+
             </div>
 
             <!-- 아군1 -->

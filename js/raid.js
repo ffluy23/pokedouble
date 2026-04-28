@@ -2242,36 +2242,23 @@ async function doSkipTurn(timerExpired = false) {
 //  [40인] Admin 슬롯 교체 패널
 //  role: admin인 경우 배틀 화면에 교체 패널 표시
 // ════════════════════════════════════════════════════════════════════
+// 변경 후
 function renderAdminSwapPanel(data, isAdmin) {
   const panelId = "admin-swap-panel"
-  let panel = document.getElementById(panelId)
+  const panel = document.getElementById(panelId)
+  if (!panel) return   // HTML에 없으면 종료
 
   if (!isAdmin) {
-    if (panel) panel.style.display = "none"
+    panel.classList.remove("visible")
     return
   }
 
-  if (!panel) {
-    panel = document.createElement("div")
-    panel.id = panelId
-    panel.style.cssText = `
-      margin-top: 10px;
-      padding: 10px 12px;
-      border: 1.5px solid #e67e22;
-      border-radius: 10px;
-      background: rgba(230,126,34,0.05);
-      font-size: 11px;
-    `
-    const wrapper = $("battle-wrapper")
-    if (wrapper) wrapper.appendChild(panel)
-  }
-
-  panel.style.display = "block"
+  panel.classList.add("visible")
   panel.innerHTML = ""
 
   const title = document.createElement("div")
-  title.style.cssText = "font-weight:bold; color:#e67e22; margin-bottom:8px; font-size:12px;"
-  title.textContent = "⚙ Admin — 슬롯 교체"
+  title.style.cssText = "font-weight:bold; color:#9b59b6; margin-bottom:8px; font-size:12px; letter-spacing:0.05em;"
+  title.textContent = "🔧 ADMIN — 슬롯 교체"
   panel.appendChild(title)
 
   const roster   = data.roster ?? {}
