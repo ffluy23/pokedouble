@@ -2407,6 +2407,7 @@ playBgm(bossPhase)
   } else if (myRosterStatus === "bench") {
     // bench: roster 엔트리로 UI 표시, 버튼 비활성화
     const benchEntry     = data.roster?.[myUid]?.entry ?? []
+    
     const benchActiveIdx = data.roster?.[myUid]?.active_idx ?? 0
     const benchPkmn      = benchEntry[benchActiveIdx]
 
@@ -2434,7 +2435,28 @@ playBgm(bossPhase)
       })
     }
 
-    updateMoveButtons(data)
+    // 기술 버튼 직접 렌더
+    const movesArr = benchPkmn?.moves ?? []
+    for (let i = 0; i < 4; i++) {
+      const btn = document.getElementById(`move-btn-${i}`)
+      if (!btn) continue
+      if (i >= movesArr.length) {
+        btn.innerHTML = '<span style="font-size:13px">-</span>'
+        btn.disabled = true; btn.onclick = null; continue
+      }
+      const mv       = movesArr[i]
+      const moveInfo = moves[mv.name] ?? {}
+      const color    = TYPE_COLORS[moveInfo.type] ?? "#a0a0a0"
+      btn.innerHTML = `
+        <span style="display:block;font-size:13px;font-weight:bold">${mv.name}</span>
+        <span style="display:block;font-size:10px;opacity:.85">PP: ${mv.pp}</span>
+      `
+      btn.style.background = color
+      btn.style.boxShadow  = `inset 0 0 0 2px white, 0 0 0 2px ${color}`
+      btn.disabled = true
+      btn.onclick  = null
+    }
+
     updateBagButton(data)
   }
   // [40인] roster 상태 변화 시 채팅 UI 전환

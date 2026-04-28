@@ -82,19 +82,32 @@ if (!allEntryReady) return res.status(400).json({ error: "entry 미완료 (타�
     const roster = {}
     const activeSlots = {}
 
-    PLAYER_SLOTS.forEach((fsSlot, i) => {
-      const legacySlot = `player${i + 1}`
-      const uid  = data[`${legacySlot}_uid`]
-      const nick = data[`${legacySlot}_name`] ?? uid?.slice(0, 6) ?? "?"
-      if (uid) {
-        roster[uid] = { status: "active", nick, role: i === 0 ? "admin" : null }
-        activeSlots[fsSlot] = uid
-      }
-    })
+   PLAYER_SLOTS.forEach((fsSlot, i) => {
+  const legacySlot = `player${i + 1}`
+  const uid  = data[`${legacySlot}_uid`]
+  const nick = data[`${legacySlot}_name`] ?? uid?.slice(0, 6) ?? "?"
+  if (uid) {
+    roster[uid] = {
+      status:     "active",
+      nick,
+      role:       i === 0 ? "admin" : null,
+      entry:      JSON.parse(JSON.stringify(data[`${fsSlot}_entry`] ?? [])),
+      active_idx: data[`${fsSlot}_active_idx`] ?? 0,
+    }
+    activeSlots[fsSlot] = uid
+  }
+})
 
     ;(data.spectators ?? []).forEach((uid, i) => {
       const nick = (data.spectator_names ?? [])[i] ?? uid.slice(0, 6)
-      roster[uid] = { status: "spectator", nick, role: null }
+   // 변경 후
+    roster[uid] = {
+      status:     "active",
+      nick,
+      role:       i === 0 ? "admin" : null,
+      entry:      JSON.parse(JSON.stringify(data[`${fsSlot}_entry`] ?? [])),
+      active_idx: data[`${fsSlot}_active_idx`] ?? 0,
+    }
     })
 
     // ── Firestore 업데이트 ───────────────────────────────────────
