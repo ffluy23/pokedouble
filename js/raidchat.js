@@ -29,6 +29,8 @@ window.initRaidChat = function({ db, ROOM_ID, myUid, mySlot, isSpectator, gameSt
 
     // 관전자 리스너 해제
     if (_unsubSpectator) { _unsubSpectator(); _unsubSpectator = null }
+    // ✅ 플레이어 리스너도 해제 후 재등록
+    if (_unsubPlayer) { _unsubPlayer(); _unsubPlayer = null }
 
     const chatSection      = document.getElementById("chat-section")
     const spectatorSection = document.getElementById("spectator-chat-section")
@@ -39,7 +41,7 @@ window.initRaidChat = function({ db, ROOM_ID, myUid, mySlot, isSpectator, gameSt
     if (labelEl) labelEl.innerText = "🗡 레이드 채팅"
 
     const container = document.getElementById("chat-messages")
-    if (container && !_unsubPlayer) {
+    if (container) {
       const ref = collection(db, "raid", ROOM_ID, "chat")
       const q   = gameStartedAt > 0
         ? query(ref, orderBy("ts"), where("ts", ">=", gameStartedAt))
