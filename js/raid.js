@@ -2240,13 +2240,12 @@ async function doSkipTurn(timerExpired = false) {
 
 // ════════════════════════════════════════════════════════════════════
 //  [40인] Admin 슬롯 교체 패널
-//  role: admin인 경우 배틀 화면에 교체 패널 표시
 // ════════════════════════════════════════════════════════════════════
-// 변경 후
+const _adminSwapState = { outSlot: null, outUid: null, inUid: null }
+
 function renderAdminSwapPanel(data, isAdmin) {
-  const panelId = "admin-swap-panel"
-  const panel = document.getElementById(panelId)
-  if (!panel) return   // HTML에 없으면 종료
+  const panel = document.getElementById("admin-swap-panel")
+  if (!panel) return
 
   if (!isAdmin) {
     panel.classList.remove("visible")
@@ -2254,105 +2253,104 @@ function renderAdminSwapPanel(data, isAdmin) {
   }
 
   panel.classList.add("visible")
-  panel.innerHTML = ""
 
-  const title = document.createElement("div")
-  title.style.cssText = "font-weight:bold; color:#9b59b6; margin-bottom:8px; font-size:12px; letter-spacing:0.05em;"
-  title.textContent = "🔧 ADMIN — 슬롯 교체"
-  panel.appendChild(title)
+  const roster      = data.roster      ?? {}
+  const activeSlots = data.active_slots ?? {}
+  const spectators  = data.spectators  ?? []
+  const spectNames  = data.spectator_names ?? []
 
-  const roster   = data.roster ?? {}
-  const slots    = data.active_slots ?? {}
-
-  // 현재 출전 슬롯 3개
-  const slotGrid = document.createElement("div")
-  slotGrid.style.cssText = "display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:8px;"
-
-  PLAYER_SLOTS.forEach(slot => {
-    const uid  = slots[slot] ?? null
-    const nick = uid ? (roster[uid]?.nick ?? uid.slice(0,6)) : "비어있음"
-    const card = document.createElement("div")
-    card.style.cssText = `
-      padding:5px 8px; border-radius:8px;
-      border:1px solid ${uid ? "#4caf50" : "#aaa"};
-      background:${uid ? "rgba(76,175,80,0.08)" : "#f5f5f5"};
-      text-align:center; font-size:10px; color:#333;
-    `
-    card.innerHTML = `<b>${slot.toUpperCase()}</b><br>${nick}`
-    slotGrid.appendChild(card)
-  })
-  panel.appendChild(slotGrid)
-
-  // 대기열 목록
-  const spectatorUids  = data.spectators      ?? []
-const spectatorNames = data.spectator_names ?? []
-
-const rosterList = Object.entries(roster)
-  .filter(([, m]) => m.status === "bench" || m.status === "spectator")
-
-const spectatorList = spectatorUids
-  .filter(uid => !roster[uid])
-  .map((uid, i) => [uid, { status: "spectator", nick: spectatorNames[i] ?? uid.slice(0, 6) }])
-
-const benchList = [...rosterList, ...spectatorList]
-  .sort((a, b) => (a[1].joinedAt ?? 0) - (b[1].joinedAt ?? 0))
-
-  if (benchList.length === 0) {
-    const empty = document.createElement("div")
-    empty.style.cssText = "color:#aaa; font-size:10px;"
-    empty.textContent = "대기 중인 플레이어 없음"
-    panel.appendChild(empty)
-    return
+  // ① 슬롯 그리드
+  const outGrid = document.getElementById("admin-out-grid")
+  if (outGrid) {
+    outGrid.innerHTML = ""
+    PLAYER_SLOTS.forEach(slot => {
+      const uid  = activeSlots[slot] ?? null
+      const nick = uid ? (roster[uid]?.nick ?? uid.slice(0, 6)) : null
+      const btn  = document.createElement("button")
+      btn.className = "admin-swap-btn" + (nick ? "" : " empty")
+      btn.innerHTML = `<span class="admin-swap-sublabel">${slot.toUpperCase()}</span><span class="admin-swap-name">${nick ?? "빈 슬롯"}</span>`
+      if (nick) {
+        btn.addEventListener("click", () => {
+          _adminSwapState.outSlot = slot
+          _adminSwapState.outUid  = uid
+          outGrid.querySelectorAll(".admin-swap-btn").forEach(b => b.classList.remove("selected"))
+          btn.classList.add("selected")
+          _updateAdminSwapHint()
+        })
+      }
+      outGrid.appendChild(btn)
+    })
   }
 
-  const benchTitle = document.createElement("div")
-  benchTitle.style.cssText = "color:#888; font-size:10px; margin-bottom:4px;"
-  benchTitle.textContent = "대기열"
-  panel.appendChild(benchTitle)
-
-  benchList.forEach(([uid, member]) => {
-    const row = document.createElement("div")
-    row.style.cssText = "display:flex; align-items:center; gap:6px; margin-bottom:4px;"
-
-    const nick = document.createElement("span")
-    nick.style.cssText = "flex:1; font-size:11px; color:#333;"
-    nick.textContent = `[${member.status === "bench" ? "대기" : "관전"}] ${member.nick ?? uid.slice(0,6)}`
-
-    const sel = document.createElement("select")
-    sel.style.cssText = "font-size:10px; padding:2px 4px; border-radius:4px; border:1px solid #ccc;"
-    sel.innerHTML = `<option value="">슬롯 선택</option>`
-    PLAYER_SLOTS.forEach(s => {
-      const opt = document.createElement("option")
-      opt.value = s
-      opt.textContent = `${s.toUpperCase()} (${slots[s] ? roster[slots[s]]?.nick ?? "누군가" : "비어있음"})`
-      sel.appendChild(opt)
+  // ② 투입 대상 그리드
+  const seen = new Set()
+  const rosterWaiting = Object.entries(roster)
+    .filter(([uid, m]) => {
+      if (m.status !== "bench" && m.status !== "spectator") return false
+      seen.add(uid)
+      return true
     })
+  const spectatorOnly = spectators
+    .filter(uid => !seen.has(uid))
+    .map((uid, i) => [uid, { nick: spectNames[i] ?? uid.slice(0, 6), status: "spectator" }])
+  const inList = [...rosterWaiting, ...spectatorOnly]
 
-    const btn = document.createElement("button")
-    btn.textContent = "교체"
-    btn.style.cssText = `
-      padding:2px 8px; border-radius:4px; border:none;
-      background:#e67e22; color:#fff; font-size:10px; cursor:pointer;
-    `
-    btn.onclick = async () => {
-      const targetSlot = sel.value
-      if (!targetSlot) { alert("슬롯을 선택해줘!"); return }
-      const outUid = slots[targetSlot] ?? null
-      btn.disabled = true; btn.textContent = "처리 중..."
-      try {
-        await _adminSwapSlot({ roomId: ROOM_ID, outUid, inUid: uid, targetSlot })
-      } catch (e) {
-        alert(`교체 실패: ${e.message}`)
-        btn.disabled = false; btn.textContent = "교체"
-      }
+  const inGrid = document.getElementById("admin-in-grid")
+  if (inGrid) {
+    inGrid.innerHTML = ""
+    if (inList.length === 0) {
+      inGrid.innerHTML = `<span style="font-size:11px;color:#aaa;grid-column:1/-1">대기 중인 플레이어 없음</span>`
+    } else {
+      inList.forEach(([uid, member]) => {
+        const nick = member.nick ?? uid.slice(0, 6)
+        const tag  = member.status === "bench" ? "대기" : "관전"
+        const btn  = document.createElement("button")
+        btn.className = "admin-swap-btn"
+        btn.innerHTML = `<span class="admin-swap-sublabel">${tag}</span><span class="admin-swap-name">${nick}</span>`
+        btn.addEventListener("click", () => {
+          _adminSwapState.inUid = uid
+          inGrid.querySelectorAll(".admin-swap-btn").forEach(b => b.classList.remove("selected"))
+          btn.classList.add("selected")
+          _updateAdminSwapHint()
+        })
+        inGrid.appendChild(btn)
+      })
     }
+  }
 
-    row.appendChild(nick)
-    row.appendChild(sel)
-    row.appendChild(btn)
-    panel.appendChild(row)
-  })
+  _adminSwapState.outSlot = null
+  _adminSwapState.outUid  = null
+  _adminSwapState.inUid   = null
+  _updateAdminSwapHint()
 }
+
+function _updateAdminSwapHint() {
+  const hint    = document.getElementById("admin-swap-hint")
+  const confirm = document.getElementById("admin-swap-confirm")
+  if (!hint || !confirm) return
+  const { outSlot, inUid } = _adminSwapState
+  if (!outSlot && !inUid)  hint.textContent = "슬롯과 투입 대상을 선택하세요"
+  else if (!outSlot)        hint.textContent = "① 비울 슬롯을 선택하세요"
+  else if (!inUid)          hint.textContent = "② 투입할 플레이어를 선택하세요"
+  else                      hint.textContent = `${outSlot.toUpperCase()} ← 투입 준비 완료 ✓`
+  confirm.disabled = !(outSlot && inUid)
+}
+
+document.getElementById("admin-swap-confirm")?.addEventListener("click", async () => {
+  const { outSlot, outUid, inUid } = _adminSwapState
+  if (!outSlot || !inUid) return
+  const btn = document.getElementById("admin-swap-confirm")
+  btn.disabled = true
+  btn.textContent = "처리 중..."
+  try {
+    await _adminSwapSlot({ roomId: ROOM_ID, outUid: outUid ?? null, inUid, targetSlot: outSlot })
+  } catch (e) {
+    alert(`교체 실패: ${e.message}`)
+  } finally {
+    btn.textContent = "교체 실행"
+    btn.disabled = false
+  }
+})
 
 // ── applyRoomData ────────────────────────────────────────────────────
 function applyRoomData(data) {
@@ -2364,6 +2362,8 @@ function applyRoomData(data) {
     const resolved = resolveMySlotAndStatus(data, myUid)
     mySlot = resolved.slot
     myRosterStatus = resolved.status
+    window.__myRosterStatus = myRosterStatus
+    if (window.__switchChatMode) window.__switchChatMode(myRosterStatus)
     // spectator URL 파라미터 없어도 roster status가 spectator면 관전자 취급
     if (resolved.status === "spectator" && !mySlot) isSpectator = true
     // bench 플레이어는 spectator처럼 로그만 봄 (isSpectator는 false 유지)
@@ -2392,6 +2392,8 @@ playBgm(bossPhase)
     updateMoveButtons(data)
     updateBagButton(data)
   }
+  // [40인] roster 상태 변화 시 채팅 UI 전환
+  updateChatSectionByStatus()
 
   // [40인] Admin 패널
   const isAdmin = !!(data.roster?.[myUid]?.role === "admin" ||
@@ -2791,6 +2793,22 @@ async function showResonanceWhiteFade() {
   await wait(50)
   fade.style.opacity = "1"
   // 이후 게임 종료는 roomRef onSnapshot이 처리
+}
+
+function updateChatSectionByStatus() {
+  const chatSection      = document.getElementById("chat-section")
+  const spectatorSection = document.getElementById("spectator-chat-section")
+  if (!chatSection || !spectatorSection) return
+
+  const isNowSpectator = isSpectator || myRosterStatus === "spectator" || myRosterStatus === "bench"
+
+  if (isNowSpectator) {
+    chatSection.style.display      = "none"
+    spectatorSection.style.display = "flex"
+  } else {
+    chatSection.style.display      = "flex"
+    spectatorSection.style.display = "none"
+  }
 }
 
 window.__doRequestAssist = doRequestAssist

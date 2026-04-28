@@ -1,4 +1,3 @@
-// js/raidchat.js - 레이드 전체 공개 채팅
 import {
   collection, addDoc, onSnapshot, query, orderBy, where
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
@@ -15,26 +14,37 @@ function appendMessage(container, nickname, text, type = "player") {
   container.scrollTop = container.scrollHeight
 }
 
+// 등록된 리스너 해제용
+let _unsubPlayer    = null
+let _unsubSpectator = null
+let _currentMode    = null  // "player" | "spectator"
+
 window.initRaidChat = function({ db, ROOM_ID, myUid, mySlot, isSpectator, gameStartedAt = 0 }) {
   const renderedPlayer    = new Set()
   const renderedSpectator = new Set()
 
-  const labelEl = document.getElementById("chat-channel-label")
+  function setupPlayerMode() {
+    if (_currentMode === "player") return
+    _currentMode = "player"
 
-  if (!isSpectator) {
-    // ── 플레이어: chat 컬렉션만 ────────────────────────────────
-    if (labelEl) labelEl.innerText = "🗡 레이드 채팅"
+    // 관전자 리스너 해제
+    if (_unsubSpectator) { _unsubSpectator(); _unsubSpectator = null }
 
+    const chatSection      = document.getElementById("chat-section")
     const spectatorSection = document.getElementById("spectator-chat-section")
+    if (chatSection)      chatSection.style.display      = "flex"
     if (spectatorSection) spectatorSection.style.display = "none"
 
+    const labelEl = document.getElementById("chat-channel-label")
+    if (labelEl) labelEl.innerText = "🗡 레이드 채팅"
+
     const container = document.getElementById("chat-messages")
-    if (container) {
+    if (container && !_unsubPlayer) {
       const ref = collection(db, "raid", ROOM_ID, "chat")
       const q   = gameStartedAt > 0
         ? query(ref, orderBy("ts"), where("ts", ">=", gameStartedAt))
         : query(ref, orderBy("ts"))
-      onSnapshot(q, snap => {
+      _unsubPlayer = onSnapshot(q, snap => {
         snap.docs.forEach(d => {
           if (renderedPlayer.has(d.id)) return
           renderedPlayer.add(d.id)
@@ -45,6 +55,7 @@ window.initRaidChat = function({ db, ROOM_ID, myUid, mySlot, isSpectator, gameSt
     }
 
     async function sendChat() {
+      if (window.__myRosterStatus === "bench" || window.__myRosterStatus === "spectator") return
       const input = document.getElementById("chat-input")
       if (!input) return
       const text = input.value.trim()
@@ -57,25 +68,28 @@ window.initRaidChat = function({ db, ROOM_ID, myUid, mySlot, isSpectator, gameSt
     const sendBtn = document.getElementById("chat-send-btn")
     if (sendBtn) sendBtn.onclick = sendChat
     const inputEl = document.getElementById("chat-input")
-    if (inputEl) inputEl.addEventListener("keypress", e => { if (e.key === "Enter") sendChat() })
+    if (inputEl) {
+      inputEl.onkeypress = e => { if (e.key === "Enter") sendChat() }
+    }
+  }
 
-  } else {
-    // ── 관전자: 플레이어 채팅 읽기(별도 칸) + 관전자 채팅 분리 ──
-    if (labelEl) labelEl.innerText = "👁 관전 중"
+  function setupSpectatorMode() {
+    if (_currentMode === "spectator") return
+    _currentMode = "spectator"
 
-    const chatSection = document.getElementById("chat-section")
-    if (chatSection) chatSection.style.display = "none"
+    const chatSection      = document.getElementById("chat-section")
     const spectatorSection = document.getElementById("spectator-chat-section")
+    if (chatSection)      chatSection.style.display      = "none"
     if (spectatorSection) spectatorSection.style.display = "flex"
 
-    // 플레이어 채팅 → 읽기 전용 컨테이너
+    // 플레이어 채팅 읽기 전용 리스너 (해제 안 함 — 계속 보여야 함)
     const playerContainer = document.getElementById("spectator-player-messages")
-    if (playerContainer) {
+    if (playerContainer && !_unsubPlayer) {
       const playerRef = collection(db, "raid", ROOM_ID, "chat")
       const playerQ   = gameStartedAt > 0
         ? query(playerRef, orderBy("ts"), where("ts", ">=", gameStartedAt))
         : query(playerRef, orderBy("ts"))
-      onSnapshot(playerQ, snap => {
+      _unsubPlayer = onSnapshot(playerQ, snap => {
         snap.docs.forEach(d => {
           if (renderedPlayer.has(d.id)) return
           renderedPlayer.add(d.id)
@@ -85,14 +99,14 @@ window.initRaidChat = function({ db, ROOM_ID, myUid, mySlot, isSpectator, gameSt
       })
     }
 
-    // 관전자 채팅 → 별도 컨테이너
+    // 관전자 채팅 리스너
     const spectatorContainer = document.getElementById("spectator-chat-messages")
-    if (spectatorContainer) {
+    if (spectatorContainer && !_unsubSpectator) {
       const spectRef = collection(db, "raid", ROOM_ID, "spectator_chat")
       const spectQ   = gameStartedAt > 0
         ? query(spectRef, orderBy("ts"), where("ts", ">=", gameStartedAt))
         : query(spectRef, orderBy("ts"))
-      onSnapshot(spectQ, snap => {
+      _unsubSpectator = onSnapshot(spectQ, snap => {
         snap.docs.forEach(d => {
           if (renderedSpectator.has(d.id)) return
           renderedSpectator.add(d.id)
@@ -115,6 +129,24 @@ window.initRaidChat = function({ db, ROOM_ID, myUid, mySlot, isSpectator, gameSt
     const sendBtn = document.getElementById("spectator-chat-send-btn")
     if (sendBtn) sendBtn.onclick = sendSpectatorChat
     const inputEl = document.getElementById("spectator-chat-input")
-    if (inputEl) inputEl.addEventListener("keypress", e => { if (e.key === "Enter") sendSpectatorChat() })
+    if (inputEl) {
+      inputEl.onkeypress = e => { if (e.key === "Enter") sendSpectatorChat() }
+    }
+  }
+
+  // 초기 모드 설정
+  if (isSpectator) {
+    setupSpectatorMode()
+  } else {
+    setupPlayerMode()
+  }
+
+  // raid.js에서 호출 가능하게 전역 노출
+  window.__switchChatMode = function(status) {
+    if (status === "spectator" || status === "bench") {
+      setupSpectatorMode()
+    } else {
+      setupPlayerMode()
+    }
   }
 }

@@ -40,8 +40,7 @@ export default async function handler(req, res) {
 
   // ── 1. outUid 처리: 현재 슬롯에서 빼기 ──────────────────────
   if (outUid) {
-    const outMember = roster[outUid]
-    if (!outMember) return res.status(404).json({ error: "퇴장 대상 없음" })
+  const outMember = roster[outUid] ?? {}
 
     // active_slots에서 제거
     if (activeSlots[targetSlot] === outUid) {
@@ -71,14 +70,18 @@ if (!inMember) {
   const spectatorNames = data.spectator_names ?? []
   const spectIdx = spectators.indexOf(inUid)
   if (spectIdx === -1) return res.status(404).json({ error: "투입 대상 없음" })
-  
+
+  // users에서 entry 미리 로드
+  const userSnap = await db.collection("users").doc(inUid).get()
+  const rawEntry = userSnap.data()?.entry ?? []
+  const freshEntry = rawEntry.map(p => ({ ...p, maxHp: p.hp }))
+
   inMember = {
     status: "spectator",
     nick: spectatorNames[spectIdx] ?? inUid.slice(0, 6),
-    entry: [],
+    entry: freshEntry,
     active_idx: 0,
   }
-  // roster에도 등록해줘야 나중에 교체 등 처리 가능
   update[`roster.${inUid}`] = {
     ...inMember,
     status: "active",
