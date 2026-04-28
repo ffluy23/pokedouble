@@ -2434,62 +2434,9 @@ playBgm(bossPhase)
     updateSyncUI(data)
     updateBagButton(data)
   } else if (myRosterStatus === "bench") {
-    // bench: roster 엔트리로 UI 표시, 버튼 비활성화
-    const benchEntry     = data.roster?.[myUid]?.entry ?? []
-    
-    const benchActiveIdx = data.roster?.[myUid]?.active_idx ?? 0
-    const benchPkmn      = benchEntry[benchActiveIdx]
-
-    // 포트레이트 / HP 카드 직접 업데이트
-    const nameEl = document.getElementById("my-active-name")
-    const hpEl   = document.getElementById("my-active-hp")
-    if (nameEl) nameEl.innerText = benchPkmn?.name ?? "-"
-    if (benchPkmn) {
-      updateHpBar("my-hp-bar", "my-active-hp", benchPkmn.hp, benchPkmn.maxHp, true)
-      updatePortrait("my", benchPkmn)
-    }
-
-    // 벤치 포켓몬도 표시
-    const bench = document.getElementById("bench-container")
-    if (bench) {
-      bench.innerHTML = ""
-      benchEntry.forEach((pkmn, idx) => {
-        if (idx === benchActiveIdx) return
-        const btn = document.createElement("button")
-        btn.innerHTML = pkmn.hp <= 0
-          ? `<span class="bench-name">${pkmn.name}</span><span class="bench-hp">기절</span>`
-          : `<span class="bench-name">${pkmn.name}</span><span class="bench-hp">HP: ${pkmn.hp}/${pkmn.maxHp}</span>`
-        btn.disabled = true
-        bench.appendChild(btn)
-      })
-    }
-
-    // 기술 버튼 직접 렌더
-    const movesArr = benchPkmn?.moves ?? []
-    for (let i = 0; i < 4; i++) {
-      const btn = document.getElementById(`move-btn-${i}`)
-      if (!btn) continue
-      if (i >= movesArr.length) {
-        btn.innerHTML = '<span style="font-size:13px">-</span>'
-        btn.disabled = true; btn.onclick = null; continue
-      }
-      const mv       = movesArr[i]
-      const moveInfo = moves[mv.name] ?? {}
-      const color    = TYPE_COLORS[moveInfo.type] ?? "#a0a0a0"
-      btn.innerHTML = `
-        <span style="display:block;font-size:13px;font-weight:bold">${mv.name}</span>
-        <span style="display:block;font-size:10px;opacity:.85">PP: ${mv.pp}</span>
-      `
-      btn.style.background = color
-      btn.style.boxShadow  = `inset 0 0 0 2px white, 0 0 0 2px ${color}`
-      btn.disabled = true
-      btn.onclick  = null
-    }
-
     updateBagButton(data)
   }
-  // [40인] roster 상태 변화 시 채팅 UI 전환
-  updateChatSectionByStatus()
+  
 
   // [40인] Admin 패널
   const isAdmin = !!(data.roster?.[myUid]?.role === "admin" ||
