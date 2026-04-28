@@ -2383,6 +2383,7 @@ function applyRoomData(data) {
     if (window.__switchChatMode) window.__switchChatMode(myRosterStatus)
     // spectator URL 파라미터 없어도 roster status가 spectator면 관전자 취급
     if (resolved.status === "spectator" && !mySlot) isSpectator = true
+    else if (resolved.status === "active" && mySlot) isSpectator = false
     // bench 플레이어는 spectator처럼 로그만 봄 (isSpectator는 false 유지)
   }
 
@@ -2692,9 +2693,7 @@ onAuthStateChanged(auth, async user => {
     isSpectator = true
     const td = $("turn-display")
     if (td) { td.innerText = "관전 중"; td.style.color = "gray" }
-  } else if (myRosterStatus === "bench") {
-    // bench: mySlot null, 채팅만 가능
-    mySlot = null
+} else if (myRosterStatus === "bench") {
     const td = $("turn-display")
     if (td) { td.innerText = "📋 대기 중"; td.style.color = "#888" }
   }
