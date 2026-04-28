@@ -29,6 +29,7 @@ window.initRaidChat = function({ db, ROOM_ID, myUid, mySlot, isSpectator, gameSt
 
     // 관전자 리스너 해제
     if (_unsubSpectator) { _unsubSpectator(); _unsubSpectator = null }
+    renderedPlayer.clear()
     // ✅ 플레이어 리스너도 해제 후 재등록
     if (_unsubPlayer) { _unsubPlayer(); _unsubPlayer = null }
 
@@ -42,6 +43,7 @@ window.initRaidChat = function({ db, ROOM_ID, myUid, mySlot, isSpectator, gameSt
 
     const container = document.getElementById("chat-messages")
     if (container) {
+      container.innerHTML = ""
       const ref = collection(db, "raid", ROOM_ID, "chat")
       const q   = gameStartedAt > 0
         ? query(ref, orderBy("ts"), where("ts", ">=", gameStartedAt))
