@@ -18,7 +18,7 @@ const BGM_URLS = {
   1: "https://added-blush-ab2rk5nplp.edgeone.app/Edge%20of%20War%20Trailer%20Music%20-%20Cinematic%20IA%20Brasil.mp3",
   2: "https://confidential-crimson-iadnxol3mz.edgeone.app/PerituneMaterial_Dramatic5.mp3",
   3: "https://colourful-harlequin-7dtqfctl65.edgeone.app/unleash-.mp3",
-  4: "https://ok-tomato-1tclxjrhed.edgeone.app/逆転.mp3",
+  4: "https://due-amber-rryl4jehgm.edgeone.app/Lost%20Memory%20-%20Sakuzyo.mp3",
 }
 let bgmAudio        = null
 let currentBgmPhase = 0
@@ -1123,13 +1123,14 @@ function showResonanceModal(data) {
   agreedEl.id = "resonance-agreed-count"
   agreedEl.style.cssText = "font-size: 12px; color: #7a8aff;"
   const agreedCount = (data.resonance_agreed ?? []).length
-  agreedEl.textContent = `동의: ${agreedCount} / 3`
+  const totalAll = Object.keys(data.roster ?? {}).length
+  agreedEl.textContent = `동의: ${agreedCount} / ${totalAll}`
 
   const btnWrap = document.createElement("div")
   btnWrap.style.cssText = "display: flex; flex-direction: column; gap: 10px; align-items: center;"
 
   // [40인] 출전 중인 플레이어만 동의 가능
-  if (!isSpectator && mySlot && myRosterStatus === "active" && myUid) {
+  if (myUid) {
     const alreadyAgreed = (data.resonance_agreed ?? []).includes(myUid)
     const agreeBtn = document.createElement("button")
     agreeBtn.id = "resonance-agree-btn"
@@ -1153,35 +1154,13 @@ function showResonanceModal(data) {
   }
 
   const isAdmin = data.roster?.[myUid]?.role === "admin"
-if (isAdmin) {
-  const adminFireBtn = document.createElement("button")
-  adminFireBtn.id = "resonance-fire-btn"
-  adminFireBtn.textContent = "⚡ 레조넌스 발동"
-  adminFireBtn.disabled    = !(data.resonance_ready ?? false)
-  adminFireBtn.style.cssText = `
-    padding: 10px 24px; border-radius: 10px; border: none;
-    background: ${data.resonance_ready ? "#e74c3c" : "#555"}; color: #fff;
-    font-size: 13px; font-weight: bold;
-    cursor: ${data.resonance_ready ? "pointer" : "not-allowed"};
-    font-family: inherit;
-    transition: background 0.2s;
-  `
-  adminFireBtn.onclick = async () => {
-  if (!data.resonance_ready) return
-  adminFireBtn.disabled = true
-  adminFireBtn.textContent = "발동 중..."
-  try {
-    await _resonanceFire({ roomId: ROOM_ID, myUid })
-    await showResonanceWhiteFade()  // 화이트 페이드
-  } catch (e) {
-    console.error("resonanceFire 오류:", e.message)
-    adminFireBtn.disabled = false
-    adminFireBtn.textContent = "⚡ 레조넌스 발동"
+  if (isAdmin) {
+    const cntEl = document.createElement("div")
+    cntEl.id = "resonance-admin-count"
+    cntEl.style.cssText = "font-size: 12px; color: #7a8aff;"
+    cntEl.textContent = `동의: ${(data.resonance_agreed ?? []).length} / ${Object.keys(data.roster ?? {}).length}`
+    btnWrap.appendChild(cntEl)
   }
-}
-
-  btnWrap.appendChild(adminFireBtn)
-}
 
   modal.appendChild(title)
   modal.appendChild(sub)
@@ -1195,7 +1174,10 @@ function updateResonanceModal(data) {
   if (!modal) return
 
   const agreedEl = document.getElementById("resonance-agreed-count")
-  if (agreedEl) agreedEl.textContent = `동의: ${(data.resonance_agreed ?? []).length} / 3`
+  if (agreedEl) {
+    const totalAll = Object.keys(data.roster ?? {}).length
+    agreedEl.textContent = `동의: ${(data.resonance_agreed ?? []).length} / ${totalAll}`
+  }
 
   const agreeBtn = document.getElementById("resonance-agree-btn")
   if (agreeBtn && myUid && (data.resonance_agreed ?? []).includes(myUid)) {
@@ -1204,12 +1186,9 @@ function updateResonanceModal(data) {
     agreeBtn.style.background = "#444"
   }
 
-  const fireBtn = document.getElementById("resonance-fire-btn")
-  if (fireBtn) {
-    fireBtn.disabled = !(data.resonance_ready ?? false)
-    fireBtn.style.background    = data.resonance_ready ? "#e74c3c" : "#555"
-    fireBtn.style.cursor        = data.resonance_ready ? "pointer"  : "not-allowed"
-    if (data.resonance_ready) fireBtn.textContent = "⚡ 레조넌스 발동"
+  const adminCntEl = document.getElementById("resonance-admin-count")
+  if (adminCntEl) {
+    adminCntEl.textContent = `동의: ${(data.resonance_agreed ?? []).length} / ${Object.keys(data.roster ?? {}).length}`
   }
 
   if (data.game_over) modal.remove()
@@ -2369,6 +2348,51 @@ document.getElementById("admin-swap-confirm")?.addEventListener("click", async (
   }
 })
 
+function renderAdminResonanceBtn(data) {
+  let btn = document.getElementById("admin-resonance-fire-btn")
+  if (!btn) {
+    btn = document.createElement("button")
+    btn.id = "admin-resonance-fire-btn"
+    btn.style.cssText = `
+      position: fixed; bottom: 80px; right: 16px;
+      z-index: 8500;
+      padding: 10px 18px; border-radius: 12px; border: none;
+      background: #e74c3c; color: #fff;
+      font-size: 13px; font-weight: bold; cursor: pointer;
+      font-family: inherit; letter-spacing: 0.05em;
+      box-shadow: 0 0 16px rgba(231,76,60,0.5);
+      transition: background 0.2s, opacity 0.2s;
+    `
+    document.body.appendChild(btn)
+  }
+
+  const isOpen  = (data.boss_state?.ultPhase ?? 0) === 2
+  const isReady = data.resonance_ready ?? false
+  const show    = data.boss_name === "누클라바스" && isOpen && !data.game_over
+
+  btn.style.display = show ? "block" : "none"
+
+  const agreedCount = (data.resonance_agreed ?? []).length
+  const totalAll = Object.keys(data.roster ?? {}).length
+  btn.textContent = `⚡ 레조넌스 발동 (${agreedCount} / ${totalAll} 동의)`
+  btn.disabled      = !isReady
+  btn.style.background = isReady ? "#e74c3c" : "#555"
+  btn.style.cursor     = isReady ? "pointer"  : "not-allowed"
+
+  btn.onclick = !isReady ? null : async () => {
+    btn.disabled = true
+    btn.textContent = "발동 중..."
+    try {
+      await _resonanceFire({ roomId: ROOM_ID, myUid })
+      await showResonanceWhiteFade()
+    } catch (e) {
+      console.error("resonanceFire 오류:", e.message)
+      btn.disabled = false
+      btn.textContent = `⚡ 레조넌스 발동 (${agreedCount}명 동의)`
+    }
+  }
+}
+
 // ── applyRoomData ────────────────────────────────────────────────────
 function applyRoomData(data) {
   currentRoomData = data
@@ -2467,6 +2491,7 @@ playBgm(bossPhase)
   const isAdmin = !!(data.roster?.[myUid]?.role === "admin" ||
                      data[`player_role_${myUid}`] === "admin")
   renderAdminSwapPanel(data, isAdmin)
+  if (isAdmin) renderAdminResonanceBtn(data)
 
   const spectEl = $("spectator-list")
   if (spectEl) {

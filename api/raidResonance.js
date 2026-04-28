@@ -60,7 +60,7 @@ export default async function handler(req, res) {
       }
 
       const newAgreed    = [...agreed, myUid]
-      const totalPlayers = getActiveTotalPlayers(data)
+      const totalPlayers = Object.keys(data.roster ?? {}).length
       isReady            = newAgreed.length >= totalPlayers
       agreedCount        = newAgreed.length
 
