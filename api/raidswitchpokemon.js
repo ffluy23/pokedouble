@@ -128,23 +128,17 @@ export default async function handler(req, res) {
 
   // ── 기절 교체 or 유턴 강제교체 ───────────────────────────────
   if (isFainted || isForceSwitch) {
-    const newOrder = isForceSwitch ? order.slice(1) : order
+    const newOrder = order
     const isEot    = newOrder.length === 0
 
     const update = {
-      ...buildEntryUpdate(entries, data),   // ← roster + 레거시 둘 다
-      [`${mySlot}_active_idx`]:   newIdx,
-      [`force_switch_${mySlot}`]: false,
-      [`${mySlot}_healWish`]:     false,
-      current_order: newOrder,
-      turn_count: isForceSwitch
-        ? (data.turn_count ?? 1) + 1
-        : (data.turn_count ?? 1),
-      ...(isForceSwitch
-        ? { turn_started_at: newOrder.length > 0 ? Date.now() : null }
-        : {}
-      ),
-    }
+  ...buildEntryUpdate(entries, data),
+  [`${mySlot}_active_idx`]:   newIdx,
+  [`force_switch_${mySlot}`]: false,
+  [`${mySlot}_healWish`]:     false,
+  current_order: newOrder,
+  turn_count: data.turn_count ?? 1,
+}
 
     PLAYER_SLOTS.forEach(s => {
       if (data[`${s}_active_idx`] !== undefined) update[`${s}_active_idx`] = data[`${s}_active_idx`]

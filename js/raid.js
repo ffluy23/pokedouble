@@ -711,10 +711,11 @@ async function handleLogEntry(entry) {
       break
     }
     case "catastro_resonance_modal": {
-      showResonanceModal(currentRoomData)
-      await wait(400)
-      break
-    }
+  await showSonnetRadio()           // 무전 대화 먼저
+  showResonanceModal(currentRoomData)
+  await wait(400)
+  break
+}
     case "revive": {
       if (meta?.slot) {
         const prefix = slotToPrefix(meta.slot)
@@ -1143,6 +1144,8 @@ function showResonanceModal(data) {
     btnWrap.appendChild(agreeBtn)
   }
 
+  const isAdmin = data.roster?.[myUid]?.role === "admin"
+if (isAdmin) {
   const adminFireBtn = document.createElement("button")
   adminFireBtn.id = "resonance-fire-btn"
   adminFireBtn.textContent = "⚡ 레조넌스 발동"
@@ -1156,17 +1159,21 @@ function showResonanceModal(data) {
     transition: background 0.2s;
   `
   adminFireBtn.onclick = async () => {
-    if (!data.resonance_ready) return
-    adminFireBtn.disabled = true
-    adminFireBtn.textContent = "발동 중..."
-    try { await _resonanceFire({ roomId: ROOM_ID, myUid }) }
-    catch (e) {
-      console.error("resonanceFire 오류:", e.message)
-      adminFireBtn.disabled = false
-      adminFireBtn.textContent = "⚡ 레조넌스 발동"
-    }
+  if (!data.resonance_ready) return
+  adminFireBtn.disabled = true
+  adminFireBtn.textContent = "발동 중..."
+  try {
+    await _resonanceFire({ roomId: ROOM_ID, myUid })
+    await showResonanceWhiteFade()  // 화이트 페이드
+  } catch (e) {
+    console.error("resonanceFire 오류:", e.message)
+    adminFireBtn.disabled = false
+    adminFireBtn.textContent = "⚡ 레조넌스 발동"
   }
+}
+
   btnWrap.appendChild(adminFireBtn)
+}
 
   modal.appendChild(title)
   modal.appendChild(sub)
@@ -2638,6 +2645,157 @@ onAuthStateChanged(auth, async user => {
   listenLogs(data?.game_started_at ?? 0)
   listenRoom()
 })
+
+// ── 소넷 무전 대화 ───────────────────────────────────────────────
+const SONNET_RADIO_LINES = [
+  { text: "... ...",                              pause: 900  },
+  { text: "얘들아.",                              pause: 700  },
+  { text: "들려?",                                pause: 700  },
+  { text: "나야, 소넷.",                          pause: 900  },
+  { text: "내가 뭘 만들었는지 알아?",             pause: 800  },
+  { text: "바로...",                              pause: 1000 },
+  { text: "너희를 전부 연결하는 장치!",           pause: 1000 },
+  { text: "방금 봤지? 따로따로 흩어지면 못 막아.", pause: 1100 },
+  { text: "...지금 그거, 전부 날리는 기술이니까.", pause: 1100 },
+  { text: "회피 불가, 방어 불가.",                pause: 1000 },
+  { text: "근데, 이 레조넌스는...",               pause: 1000 },
+  { text: "응, 어렵게 설명하면 안 들을 거잖아.",  pause: 1100 },
+  { text: "아무튼, 조건을 맞추면, 되돌릴 수 있어.", pause: 1100 },
+  { text: "조건? 간단해. 전원 동의. 출력 동기화.", pause: 1100 },
+  { text: "귀찮은 방식이지, 알아.",               pause: 900  },
+  { text: "한 명이라도 빠지면... 실패.",           pause: 1000 },
+  { text: "그래도...",                            pause: 800  },
+  { text: "이게 제일 확률 높아.",                 pause: 1200 },
+  { text: null,                                   pause: 900  },
+  { text: "있지, 나 너희를 믿으니까.",             pause: 1000 },
+  { text: "너희도 나를 믿어줄 거지?",             pause: 1000 },
+  { text: "그리고 서로를.",                       pause: 900  },
+  { text: "...",                                  pause: 1200 },
+  { text: "시작할게.",                            pause: 800  },
+]
+
+function showSonnetRadio() {
+  return new Promise(resolve => {
+    const existing = document.getElementById("sonnet-radio-overlay")
+    if (existing) existing.remove()
+
+    const overlay = document.createElement("div")
+    overlay.id = "sonnet-radio-overlay"
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 9500;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding-top: 14vh;
+    `
+
+    const bubble = document.createElement("div")
+    bubble.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    `
+
+    const tag = document.createElement("div")
+    tag.style.cssText = `
+      font-size: 11px;
+      color: rgba(180, 160, 255, 0.7);
+      letter-spacing: 0.15em;
+      font-weight: bold;
+    `
+    tag.textContent = "◈ SONNET"
+
+    const msg = document.createElement("div")
+    msg.style.cssText = `
+      font-size: clamp(14px, 3.5vw, 18px);
+      color: #e8e0ff;
+      text-align: center;
+      line-height: 1.6;
+      letter-spacing: 0.03em;
+      padding: 12px 24px;
+      background: rgba(10, 8, 28, 0.85);
+      border: 1px solid rgba(160, 140, 255, 0.35);
+      border-radius: 12px;
+      max-width: min(460px, 86vw);
+      opacity: 0;
+      transition: opacity 0.35s ease;
+      text-shadow: 0 0 12px rgba(180, 160, 255, 0.4);
+    `
+
+    bubble.appendChild(tag)
+    bubble.appendChild(msg)
+    overlay.appendChild(bubble)
+    document.body.appendChild(overlay)
+
+    async function playLines() {
+      for (const line of SONNET_RADIO_LINES) {
+        if (line.text === null) {
+          // 텀: 현재 말풍선 페이드아웃 후 대기
+          msg.style.opacity = "0"
+          await wait(line.pause)
+          continue
+        }
+
+        // 이전 대사 페이드아웃
+        if (msg.style.opacity === "1") {
+          msg.style.opacity = "0"
+          await wait(320)
+        }
+
+        // 새 대사 세팅 후 페이드인
+        msg.textContent = line.text
+        await wait(40) // 리플로우
+        msg.style.opacity = "1"
+
+        // 대사 길이에 비례한 대기
+        await wait(line.pause + line.text.length * 22)
+      }
+
+      // 마지막 대사 페이드아웃
+      msg.style.opacity = "0"
+      await wait(400)
+      overlay.remove()
+      resolve()
+    }
+
+    playLines()
+  })
+}
+
+async function showResonanceWhiteFade() {
+  const modal = document.getElementById("resonance-modal")
+  if (modal) {
+    modal.style.transition = "opacity 0.5s ease"
+    modal.style.opacity = "0"
+    await wait(500)
+    modal.remove()
+  }
+
+  const logEl = $("battle-log")
+  await typeText(logEl, "이제 온다.")
+  await wait(700)
+  await typeText(logEl, "프로토콜, 실행!")
+  await wait(900)
+
+  const fade = document.createElement("div")
+  fade.style.cssText = `
+    position: fixed; inset: 0; z-index: 9999;
+    background: #fff;
+    opacity: 0;
+    pointer-events: all;
+    transition: opacity 2.4s ease;
+  `
+  document.body.appendChild(fade)
+
+  await wait(50)
+  fade.style.opacity = "1"
+  // 이후 게임 종료는 roomRef onSnapshot이 처리
+}
 
 window.__doRequestAssist = doRequestAssist
 window.__doAgreeAssist   = doAgreeAssist

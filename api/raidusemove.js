@@ -971,7 +971,7 @@ export default async function handler(req, res) {
 
   const logEntries = []
 
-  
+
   if (isAttackMove && anyBeedrillAlive(data)) {
     const isAoe = !!(moveInfo?.aoe || moveInfo?.aoeEnemy)
     const isAllyOnlyTarget = tSlots.length > 0 && tSlots.every(s => PLAYER_SLOTS.includes(s))
@@ -1692,7 +1692,7 @@ export default async function handler(req, res) {
         } else {
           const effectTarget = moveInfo?.targetSelf === false ? fakeBoss : myPkmn
           applyMoveEffect(moveInfo?.effect, myPkmn, effectTarget, 0).forEach(m => {
-            if (m.includes("상태")) data.boss_status = moveInfo.effect?.status ?? null
+           if (m.includes("상태") && data.boss_name !== "누클라바스") data.boss_status = moveInfo.effect?.status ?? null
             logEntries.push(makeLog("normal", m))
           })
           if (moveInfo?.targetSelf === false && fakeBoss.status !== (data.boss_status ?? null)) {

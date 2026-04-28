@@ -19,7 +19,10 @@ export default async function handler(req, res) {
   if (!data.game_started || data.game_over)
     return res.status(403).json({ error: "게임 진행 중이 아님" })
 
-  if (data.sync_used)    return res.status(403).json({ error: "이미 싱크로를 사용했음" })
+ const bossState = data.boss_state ?? {}
+const isElectricPhase = bossState.phase === 4 && bossState.phase4CoreSeq === 1
+if (!isElectricPhase && data.sync_used)
+  return res.status(403).json({ error: "이미 싱크로를 사용했음" })
   if (data.sync_active)  return res.status(403).json({ error: "싱크로가 이미 활성화됨" })
   if (data.sync_request) return res.status(403).json({ error: "이미 요청 중" })
 
