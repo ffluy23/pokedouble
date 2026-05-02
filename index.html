@@ -5,150 +5,116 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
-  @import url('https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css');
-
-body.login-page {
+@import url('https://cdn.jsdelivr.net/gh/MonadABXY/mona-font/web/mona.css');
+/* 기본 리셋 */
+* {
   margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Mona12',sans-serif;
+}
+
+/* 배경 */
+.login-page {
   height: 100vh;
-  background: #0f1115;
-  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: #ffffff;
   display: flex;
   justify-content: center;
   align-items: center;
-  color: #d1d5db;
 }
 
-* {
-  -webkit-tap-highlight-color: transparent;
-}
-
+/* 컨테이너 */
 .login-container {
-  text-align: left;
   width: 100%;
-  display: flex;
-  justify-content: center;
-  padding: 0 20px;
-  box-sizing: border-box;
+  max-width: 400px;
+  padding: 40px 24px;
+  text-align: center;
 }
 
+/* 타이틀 */
 .login-container h2 {
-  font-size: 14px;
-  font-weight: normal;
-  margin-bottom: 12px;
-  color: #9ca3af;
-  letter-spacing: 1px;
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 32px;
+  color: #111;
 }
 
+/* 박스 */
 .login-box {
-  width: 260px;
-  max-width: 100%;
-  padding: 20px;
-  background: #14171d;
-  border: 1px solid #2a2f3a;
-  border-radius: 6px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.02) inset;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  position: relative;
-  box-sizing: border-box;
+  gap: 16px;
 }
 
+/* 인풋 */
 .login-box input {
-  background: #0d0f14;
-  border: 1px solid #2a2f3a;
-  color: #e5e7eb;
-  padding: 10px;
-  font-size: 13px;
-  border-radius: 4px;
-  outline: none;
-  transition: 0.15s;
-  width: 100%;
-  box-sizing: border-box;
-  /* 모바일 Safari 자동 확대 방지 */
-  -webkit-text-size-adjust: 100%;
+  padding: 14px 16px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: 0.2s;
 }
 
-.login-box input::placeholder {
-  color: #6b7280;
-}
-
+/* 포커스 */
 .login-box input:focus {
-  border-color: #3b4252;
-  background: #10131a;
+  outline: none;
+  border-color: #000;
 }
 
+/* 버튼 */
 .btn {
-  margin-top: 6px;
-  padding: 10px;
-  font-size: 12px;
-  background: #1c212b;
-  border: 1px solid #2f3542;
-  color: #cbd5e1;
+  padding: 14px;
+  border: none;
+  border-radius: 8px;
+  background: #000;
+  color: #fff;
+  font-weight: 600;
   cursor: pointer;
-  border-radius: 4px;
-  transition: 0.15s;
-  width: 100%;
-  box-sizing: border-box;
+  transition: 0.2s;
 }
 
+/* hover */
 .btn:hover {
-  background: #232938;
+  background: #222;
 }
 
+/* active */
 .btn:active {
-  transform: translateY(1px);
+  transform: scale(0.98);
 }
 
-.login-box::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(255,255,255,0.02),
-    rgba(255,255,255,0.02) 1px,
-    transparent 1px,
-    transparent 3px
-  );
-  pointer-events: none;
-  opacity: 0.15;
-}
-
-/* ── 모바일 ── */
+/* 모바일 */
 @media (max-width: 480px) {
-  body.login-page {
-    align-items: center;
+  .login-container {
+    padding: 24px 16px;
   }
 
-  .login-box {
-    width: 100%;
-    padding: 24px 20px;
-    border-radius: 8px;
+  .login-container h2 {
+    font-size: 24px;
   }
 
   .login-box input {
-    padding: 12px 10px;
-    font-size: 16px; /* Safari 자동 줌 방지 (16px 미만이면 줌됨) */
+    padding: 12px;
   }
 
   .btn {
-    padding: 13px;
-    font-size: 13px;
+    padding: 12px;
   }
 }
 </style>
 
-<title>ID: Sonnet</title>
+<title>Login</title>
 </head>
 
 <body class="login-page">
 
   <div class="login-container">
+    <h2>메리프</h2>
+
     <div class="login-box">
-      <input type="email" id="email" placeholder="email" autocomplete="email">
-      <input type="password" id="password" placeholder="password" autocomplete="current-password">
-      <button class="btn" id="loginBtn">Login</button>
+      <input type="email" id="email" placeholder="이메일">
+      <input type="password" id="password" placeholder="비밀번호">
+      <button class="btn" id="loginBtn">로그인</button>
     </div>
   </div>
 
