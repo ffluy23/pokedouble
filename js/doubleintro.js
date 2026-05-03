@@ -4,7 +4,7 @@ import { auth, db } from "./firebase.js"
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"
 import { doc, getDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
 
-const BGM_URL = "https://principal-coral-pd9dwcb4ap.edgeone.app/Waking%20of%20a%20World%20(JP)%20-%20Wuthering%20Waves.mp3"
+const BGM_URL = "https://yammering-plum-4dz18pzi3m.edgeone.app/동트기%20전%20-%20붕괴%20스타레일.mp3"
 
 const BG_LIST = [
   "https://foolish-rose-9l9aoow1vy.edgeone.app/배경1%20(1).jpg",
