@@ -212,7 +212,7 @@ export const moves = {
   "녹기":      { power: 0,  type: "독", accuracy: 100, alwaysHit: true,  effect: null,
                  rank: { def: 2, turns: 2 } },
   "킬러스핀":  { power: 40, type: "독", accuracy: 100, alwaysHit: false,
-                 rapidSpin: true, rank: { spd: 1, turns: 3 }, effect: { chance: 1, status: "독" }, aoeEnemy: true },
+                 rapidSpin: true, effect: { chance: 1, status: "독" }, aoeEnemy: true },
 
   // ───── 땅 ─────
   "지진":       { power: 50, type: "땅", accuracy: 100, alwaysHit: false, effect: null, aoe: true },
@@ -464,5 +464,5 @@ export const moves = {
   // 트라이어택: 20% 확률 마비/화상/얼음 (triAttack)
   "트라이어택": { power: 50, type: "노말", accuracy: 100, alwaysHit: false,
                   effect: { chance: 0.2, triAttack: true } },
-  "물거품아리아":{ power: 50, type: "물",  accuracy: 100, alwaysHit: false, effect: { cureburn: true } },
+  "물거품아리아":{ power: 50, type: "물",  accuracy: 100, alwaysHit: false, effect: { cureburn: true }, aoe: true },
 }
