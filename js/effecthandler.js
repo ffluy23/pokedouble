@@ -109,7 +109,7 @@ export function checkPreActionStatus(pokemon) {
     }
   }
   if (pokemon.status === "얼음") {
-    if (Math.random() < 0.20) {
+    if (Math.random() < 0.45) {
       pokemon.status = null
       msgs.push(`${pokemon.name}${josa(pokemon.name, "은는")} 얼음 상태에서 회복됐다!`)
       return { blocked: false, msgs, statusCleared: true }
