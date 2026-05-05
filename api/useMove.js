@@ -101,7 +101,6 @@ function applyRankChanges(r, self, target, moveName, logEntries) {
       obj[key] = next
       if ((obj[`${key}Turns`] ?? 0) <= 0) obj[`${key}Turns`] = r.turns ?? 2
       logEntries.push(makeLog("normal", `${name}의 ${label} 랭크가 ${cur - next} 내려갔다! (${next > 0 ? "+" : ""}${next})`))
-      // 분풀이용: 상대 랭크 하락 시 플래그 세팅
       if (isTarget) target.hadRankDropThisTurn = true
     }
   }
@@ -194,6 +193,31 @@ function calcDamage(atk, moveName, def, powerOverride = null, atkStatOverride = 
   const critical = Math.random() * 100 < critRate
   const finalDmg = Math.floor(baseDmg * flyElecMult * twisterFlyMult * digEarthMult)
   return { damage: critical ? Math.floor(finalDmg * 1.5) : finalDmg, multiplier: mult, stab, critical, dice }
+}
+
+// ── 장판 데미지 공통 헬퍼 (roar 강제교체 / 일반 교체 공통 사용) ──
+function applyHazardDamage(slot, newPkmn, data, logEntries) {
+  const team = teamOf(slot)
+
+  // 스텔스록
+  const srKey = `field_${team}_stealth_rock`
+  if ((data[srKey] ?? 0) > 0 && newPkmn.hp > 0) {
+    const dmg = Math.max(1, Math.floor((newPkmn.maxHp ?? newPkmn.hp) * 0.125))
+    newPkmn.hp = Math.max(0, newPkmn.hp - dmg)
+    logEntries.push(makeLog("normal", `스텔스록이 ${newPkmn.name}${josa(newPkmn.name, "을를")} 공격했다! (-${dmg})`))
+    logEntries.push(makeLog("hp", "", { slot, hp: newPkmn.hp, maxHp: newPkmn.maxHp }))
+    if (newPkmn.hp <= 0) logEntries.push(makeLog("faint", `${newPkmn.name}${josa(newPkmn.name, "은는")} 쓰러졌다!`, { slot }))
+  }
+
+  // 독압정
+  const tsKey = `field_${team}_toxic_spikes`
+  const tsVal = data[tsKey] ?? 0
+  if (tsVal > 0 && newPkmn.hp > 0 && !newPkmn.status) {
+    const pkmnTypes = Array.isArray(newPkmn.type) ? newPkmn.type : [newPkmn.type]
+    if (!pkmnTypes.includes("비행") && !pkmnTypes.includes("강철") && !pkmnTypes.includes("독")) {
+      applyStatus(newPkmn, "독").forEach(m => logEntries.push(makeLog("normal", m)))
+    }
+  }
 }
 
 // ════════════════════════════════════════════════════════
@@ -402,14 +426,11 @@ function handleSpecialNonAttack(moveInfo, moveName, myPkmn, mySlot, tSlots, entr
     return { handled: true }
   }
 
-  // ── 아침햇살 / 달빛: moonlight 날씨 분기 ──────────────────────
   if (moveInfo.effect?.moonlight) {
     const weather = data.weather ?? null
     let healRate
     if (weather === "쾌청") {
       healRate = 0.25
-    } else if (weather === "비" || weather === "싸라기눈" || weather === "모래바람" || weather === null && false) {
-      healRate = 0.18
     } else if (weather === "비" || weather === "싸라기눈" || weather === "모래바람") {
       healRate = 0.18
     } else {
@@ -442,7 +463,6 @@ function handleSpecialNonAttack(moveInfo, moveName, myPkmn, mySlot, tSlots, entr
 
   // ── 알낳기 / 우유마시기: 자신 22%, 아군 18% ─────────────────
   if (moveInfo.allyHeal !== undefined && moveInfo.effect?.heal) {
-    // tSlots가 아군 슬롯이면 아군 회복
     if (tSlots.length > 0) {
       const tSlot = tSlots[0]
       const tIdx  = data[`${tSlot}_active_idx`] ?? 0
@@ -528,11 +548,15 @@ function handleSpecialNonAttack(moveInfo, moveName, myPkmn, mySlot, tSlots, entr
     if (benchAlive.length === 0) {
       logEntries.push(makeLog("normal", `그러나 ${tPkmn.name}에게는 맞지 않았다!`))
     } else {
-      const randIdx = benchAlive[Math.floor(Math.random() * benchAlive.length)]
-      tPkmn.seeded = false
+      const randIdx  = benchAlive[Math.floor(Math.random() * benchAlive.length)]
+      const newPkmn  = tEntry[randIdx]
+      tPkmn.seeded   = false
       logEntries.push(makeLog("normal", `${tPkmn.name}${josa(tPkmn.name, "은는")} 물러났다!`))
-      logEntries.push(makeLog("normal", `${tEntry[randIdx].name}${josa(tEntry[randIdx].name, "이가")} 나왔다!`))
+      logEntries.push(makeLog("normal", `${newPkmn.name}${josa(newPkmn.name, "이가")} 나왔다!`))
       data[`${tSlot}_active_idx`] = randIdx
+
+      // [수정 2] 날려버리기로 강제교체된 포켓몬에도 장판 데미지 적용
+      applyHazardDamage(tSlot, newPkmn, data, logEntries)
     }
     return { handled: true }
   }
@@ -1010,23 +1034,25 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     return { handled: false, damage: 0 }
   }
 
+  // ── [수정 3] 킬러스핀: rapidSpin + aoeEnemy 조합에서 effect.status(독) 적용 ──
   if (moveInfo.rapidSpin) {
     const { hit, hitType } = calcHit(myPkmn, moveInfo, tPkmn)
     if (!hit) { missLog(hitType); return { handled: true, damage: 0 } }
     const { damage, multiplier, critical, minRoll, minDice } = calcDamage(myPkmn, moveName, tPkmn)
     if (multiplier === 0) { logEntries.push(makeLog("normal", `${tPkmn.name}에게는 효과가 없다…`)); return { handled: true, damage: 0 } }
     dealDamage(damage, multiplier, critical, tSlot, tPkmn, minRoll, minDice)
-    // 씨뿌리기 해제
+    // 씨뿌리기 해제 (자신)
     if (myPkmn.seeded) {
       myPkmn.seeded     = false
       myPkmn.seederSlot = null
       logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 씨뿌리기가 풀렸다!`))
     }
-    // 엉겨붙기 / 김밥말이 해제
+    // 엉겨붙기 / 김밥말이 해제 (자신)
     if (myPkmn.wrapState) {
       myPkmn.wrapState = null
       logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 묶임에서 풀려났다!`))
     }
+    // 장판 제거
     const myTeamForSpin = teamOf(mySlot)
     ;["stealth_rock", "toxic_spikes"].forEach(f => {
       const k = `field_${myTeamForSpin}_${f}`
@@ -1036,6 +1062,13 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
       }
     })
     if (moveInfo.rank) applyRankChanges(moveInfo.rank, myPkmn, tPkmn, null, logEntries)
+    // effect.status 처리 (킬러스핀 독 부여)
+    if (moveInfo.effect?.status && tPkmn.hp > 0) {
+      const chance = moveInfo.effect.chance ?? 1
+      if (Math.random() < chance) {
+        applyStatus(tPkmn, moveInfo.effect.status).forEach(m => logEntries.push(makeLog("normal", m)))
+      }
+    }
     return { handled: true, damage }
   }
 
@@ -1060,7 +1093,6 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     return { handled: false, damage: 0 }
   }
 
-  // ── 소금물: 상대 HP 절반 이하면 위력 80 ─────────────────────
   if (moveInfo.saltWater) {
     const { hit, hitType } = calcHit(myPkmn, moveInfo, tPkmn)
     if (!hit) { missLog(hitType); return { handled: true, damage: 0 } }
@@ -1073,7 +1105,7 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     return { handled: true, damage }
   }
 
-  // ── 엉겨붙기 / 김밥말이: wrapState 설정 ─────────────────────
+  // ── [수정 1] 김밥말이(noSwitch:false)와 엉겨붙기(noSwitch:true) 분리 처리 ──
   if (moveInfo.wrap) {
     const { hit, hitType } = calcHit(myPkmn, moveInfo, tPkmn)
     if (!hit) { missLog(hitType); return { handled: true, damage: 0 } }
@@ -1081,16 +1113,17 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     if (multiplier === 0) { logEntries.push(makeLog("normal", `${tPkmn.name}에게는 효과가 없다…`)); return { handled: true, damage: 0 } }
     dealDamage(damage, multiplier, critical, tSlot, tPkmn, minRoll, minDice)
     if (tPkmn.hp > 0) {
-      // 이미 wrapState면 갱신하지 않음
       if (!tPkmn.wrapState) {
         const turnsLeft = Math.floor(Math.random() * 2) + 4 // 4~5턴
+        const noSwitch  = moveInfo.noSwitch === true  // 엉겨붙기만 true, 김밥말이는 false
         tPkmn.wrapState = {
           turnsLeft,
           attackerSlot: mySlot,
           moveName,
-          noSwitch: moveInfo.noSwitch ?? true, // 엉겨붙기=true, 김밥말이=false
+          noSwitch,
         }
-        const wrapMsg = moveInfo.noSwitch
+        // [수정 1] 메시지를 noSwitch 여부에 따라 분기
+        const wrapMsg = noSwitch
           ? `${tPkmn.name}${josa(tPkmn.name, "은는")} 엉겨붙었다! 교체할 수 없다!`
           : `${tPkmn.name}${josa(tPkmn.name, "은는")} 휘감겼다!`
         logEntries.push(makeLog("normal", wrapMsg))
@@ -1099,7 +1132,6 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     return { handled: true, damage }
   }
 
-  // ── 트라이어택: 20% 확률로 마비/화상/얼음 중 하나 ─────────────
   if (moveInfo.effect?.triAttack) {
     const { hit, hitType } = calcHit(myPkmn, moveInfo, tPkmn)
     if (!hit) { missLog(hitType); return { handled: true, damage: 0 } }
@@ -1114,11 +1146,9 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     return { handled: true, damage }
   }
 
-  // ── 분함의발구르기: 직전 턴 빗나갔으면 위력 60 ───────────────
   if (moveInfo.stomping) {
     const { hit, hitType } = calcHit(myPkmn, moveInfo, tPkmn)
     if (!hit) {
-      // 빗나갔음을 기록
       myPkmn.missedLastTurn = true
       missLog(hitType)
       return { handled: true, damage: 0 }
@@ -1132,7 +1162,6 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     return { handled: true, damage }
   }
 
-  // ── 분풀이: 이번 턴 랭크 하락 있으면 위력 60 ─────────────────
   if (moveInfo.vengeance) {
     const { hit, hitType } = calcHit(myPkmn, moveInfo, tPkmn)
     if (!hit) { missLog(hitType); return { handled: true, damage: 0 } }
@@ -1145,10 +1174,7 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     return { handled: true, damage }
   }
 
-  // ── 불사르기: 화상 상태 포켓몬에게 더 강함 & 화상 해제 ────────
-  // ── 불사르기: 사용자 불꽃 타입 필요, 공격 후 불꽃 타입 제거(2턴), 상대 얼음 해제
   if (moveInfo.burnOff) {
-    // 사용자가 불꽃 타입이 아니면 실패
     const myTypes = Array.isArray(myPkmn.type) ? myPkmn.type : [myPkmn.type]
     if (!myTypes.includes("불")) {
       logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 불꽃 타입이 아니라 실패했다!`))
@@ -1159,12 +1185,10 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     const { damage, multiplier, critical, minRoll, minDice } = calcDamage(myPkmn, moveName, tPkmn)
     if (multiplier === 0) { logEntries.push(makeLog("normal", `${tPkmn.name}에게는 효과가 없다…`)); return { handled: true, damage: 0 } }
     dealDamage(damage, multiplier, critical, tSlot, tPkmn, minRoll, minDice)
-    // 상대 얼음 상태 해제
     if (tPkmn.hp > 0 && tPkmn.status === "얼음") {
       tPkmn.status = null
       logEntries.push(makeLog("normal", `${tPkmn.name}${josa(tPkmn.name, "의")} 얼음이 녹았다!`))
     }
-    // 사용자 불꽃 타입 제거 (2턴 후 복귀)
     myPkmn._burnOffOrigType = myTypes
     myPkmn.type = myTypes.filter(t => t !== "불")
     if (myPkmn.type.length === 0) myPkmn.type = ["노말"]
@@ -1173,7 +1197,6 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     return { handled: true, damage }
   }
 
-  // ── 트릭플라워: 무조건 급소 ──────────────────────────────────
   if (moveInfo.alwaysCrit) {
     const { hit, hitType } = calcHit(myPkmn, moveInfo, tPkmn)
     if (!hit) { missLog(hitType); return { handled: true, damage: 0 } }
@@ -1556,12 +1579,6 @@ export default async function handler(req, res) {
 
       const tSlots = targetSlots ?? []
 
-      // ── 분풀이 랭크하락 체크: 이번 기술 선언 전에 이미 세팅됨
-      // hadRankDropThisTurn은 applyRankChanges에서 setTarget에 의해 세팅되어야 하지만
-      // 간단하게: 기술 사용 시점에 이미 ranks가 내려간 상태면 true로 봄
-      // (별도 턴 추적보다 심플하게 처리)
-
-      // ★ 방어 체크
       if (!moveInfo?.ghostDive) {
         for (const tSlot of tSlots) {
           const tIdx  = data[`${tSlot}_active_idx`] ?? 0
@@ -1658,16 +1675,12 @@ export default async function handler(req, res) {
           const tPkmn = entries[tSlot][tIdx]
           if (!tPkmn || tPkmn.hp <= 0) continue
 
-          // ── wrapState: noSwitch=true인 경우 교체 불가 처리는 switchPokemon API에서 체크
-          // 여기서는 wrapState 자체는 공격 진행에 영향 없음
-
           const specialAtk = handleSpecialAttack(moveInfo, moveData.name, myPkmn, mySlot, tSlot, tPkmn, entries, data, logEntries)
           if (specialAtk.handled) continue
 
           const { hit, hitType } = calcHit(myPkmn, moveInfo, tPkmn)
           if (!hit) {
             logEntries.push(makeLog("normal", hitType === "evaded" ? `${tPkmn.name}에게는 맞지 않았다!` : `그러나 ${myPkmn.name}의 공격은 빗나갔다!`))
-            // 분함의발구르기 빗나감 기록
             if (moveInfo?.stomping) myPkmn.missedLastTurn = true
             if (moveInfo?.jumpKick) {
               const selfDmg = Math.max(1, Math.floor((myPkmn.maxHp ?? myPkmn.hp) * 0.25))
@@ -1760,12 +1773,10 @@ export default async function handler(req, res) {
           applyMoveEffect({ ...moveInfo?.effect, drain: 0 }, myPkmn, tPkmn, mainDmg).forEach(m => logEntries.push(makeLog("normal", m)))
           if (moveInfo?.rank) applyRankChanges(moveInfo.rank, myPkmn, tPkmn, null, logEntries)
 
-          // 물거품아리아: 명중 후 상대 화상 해제
           if (moveInfo?.effect?.cureburn && tPkmn.hp > 0 && tPkmn.status === "화상") {
             tPkmn.status = null
             logEntries.push(makeLog("normal", `${tPkmn.name}${josa(tPkmn.name, "의")} 화상이 나았다!`))
           }
-          // 사이코노이즈: 명중 후 상대 회복봉인
           if (moveInfo?.effect?.healBlock && tPkmn.hp > 0) {
             if ((tPkmn.healBlocked ?? 0) > 0) {
               logEntries.push(makeLog("normal", `${tPkmn.name}${josa(tPkmn.name, "은는")} 이미 회복봉인 상태다!`))
@@ -1833,12 +1844,10 @@ export default async function handler(req, res) {
         }
       }
 
-      // ── 하이퍼빔 사용 후 다음 턴 재충전 플래그
       if (moveInfo?.hyperBeam) {
         myPkmn.hyperBeamState = true
       }
 
-      // ── 유턴: 공격 후 강제 교체
       if (moveInfo?.uTurn) {
         const canSwitch = (entries[mySlot] ?? []).some((p, i) => i !== myActiveIdx && p.hp > 0)
         const didHit    = logEntries.some(e => e.type === "hit")
@@ -1906,11 +1915,8 @@ export default async function handler(req, res) {
           logEntries.push(makeLog("normal", `${pkmn.name}${josa(pkmn.name, "의")} 사슬묶기가 풀렸다!`))
         }
       }
-      // 분함의발구르기 miss 플래그 초기화 (EOT에)
       pkmn.missedLastTurn = false
-      // 분풀이 랭크하락 플래그 초기화
       pkmn.hadRankDropThisTurn = false
-      // 불사르기 불꽃 타입 복귀
       if ((pkmn.burnOffTurns ?? 0) > 0) {
         pkmn.burnOffTurns--
         if (pkmn.burnOffTurns <= 0 && pkmn._burnOffOrigType) {
@@ -1967,7 +1973,6 @@ export default async function handler(req, res) {
   if (isEot) {
     const eotLogEntries = []
     await applyLeechSeedEot(entries, data, eotLogEntries)
-    // ── wrapState EOT 데미지
     await applyWrapEot(entries, data, eotLogEntries)
 
     ALL_FS.forEach(s => {

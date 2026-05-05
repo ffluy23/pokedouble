@@ -232,7 +232,6 @@ function triggerAutoAction(data) {
       ? allyPkmn.hp / (allyPkmn.maxHp ?? allyPkmn.hp)
       : 1
     const myHpRatio = myPkmn.hp / (myPkmn.maxHp ?? myPkmn.hp)
-    // 아군이 살아있고 아군 HP가 더 낮으면 아군에게
     if (allyPkmn && allyPkmn.hp > 0 && allyHpRatio < myHpRatio && allyHpRatio < 0.8) {
       doUseMove(moveIdx, [allySlot], data)
     } else {
@@ -580,6 +579,16 @@ let pendingMoveIdx = -1
 function onMoveClick(idx, moveInfo, data) {
   if (actionDone) return
 
+  // ── [수정 4] allyHeal 기술은 타겟 모드로 즉시 진입 (아군 선택 UI)
+  if (moveInfo?.allyHeal !== undefined) {
+    enterTargetMode(idx, data, {
+      targetsEnemy: false,
+      targetsAlly:  true,
+      canSelf:      true
+    })
+    return
+  }
+
   if (moveInfo?.outrage) {
     const enemies = enemySlotsOf(mySlot).filter(s => {
       const ai = data[`${s}_active_idx`] ?? 0
@@ -623,14 +632,13 @@ function onMoveClick(idx, moveInfo, data) {
     || (moveInfo?.effect?.volatile && !moveInfo?.targetSelf)
     || (moveInfo?.effect?.status && moveInfo?.targetSelf === false)
 
-  // 알낳기/우유마시기: 아군도 타겟 가능 (자신 선택 시 [] 전송)
-  const targetsAlly = !!(moveInfo?.healPulse || moveInfo?.pollenPuff || moveInfo?.decoration || moveInfo?.allyHeal !== undefined)
+  const targetsAlly = !!(moveInfo?.healPulse || moveInfo?.pollenPuff || moveInfo?.decoration)
 
   if (targetsEnemy || targetsAlly) {
     enterTargetMode(idx, data, {
       targetsEnemy: !!targetsEnemy,
       targetsAlly:  !!targetsAlly,
-      canSelf:      moveInfo?.allyHeal !== undefined  // 자기 자신도 선택 가능
+      canSelf:      false
     })
   } else {
     doUseMove(idx, [], data)
@@ -719,8 +727,10 @@ function updateBenchButtons(data) {
   const isDiving   = !!(myActivePkmn?.ghostDiveState?.diving)
   const isFlying   = !!(myActivePkmn?.flyState?.flying)
   const isDigging  = !!(myActivePkmn?.digState?.digging)
-  // 엉겨붙기(noSwitch=true)이면 교체 불가. 단 force_switch(유턴/기절) 예외
-  const isWrapped  = !!(myActivePkmn?.wrapState?.noSwitch && !forceSwitch)
+
+  // [수정 1] 기절 상태이면 wrapState 교체불가 무시 (forceSwitch도 동일)
+  // 엉겨붙기(noSwitch=true)이면 교체 불가. 단 force_switch(유턴/기절) 예외, 기절 예외
+  const isWrapped  = !!(myActivePkmn?.wrapState?.noSwitch && !forceSwitch && !isFainted)
 
   const forcedHint = $("forced-switch-hint")
   if (forcedHint) forcedHint.style.display = "none"

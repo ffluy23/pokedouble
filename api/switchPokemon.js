@@ -26,6 +26,7 @@ function resetOnSwitch(pkmn) {
   pkmn.tormented     = false
   pkmn.outrageState  = null
   pkmn.hyperBeamState = false
+  pkmn.flinch        = false  // [수정] 교체 시 풀죽음 리셋
 }
 
 // 문자열 배열로 반환 (writeLogs가 string[] 기대)
@@ -81,8 +82,8 @@ export default async function handler(req, res) {
   const isFainted = !prevPkmn || prevPkmn.hp <= 0
 
   const isForceSwitch = !!data[`force_switch_${mySlot}`]
-if (!isFainted && !isForceSwitch && order[0] !== mySlot)
-  return res.status(403).json({ error: "내 턴이 아님" })
+  if (!isFainted && !isForceSwitch && order[0] !== mySlot)
+    return res.status(403).json({ error: "내 턴이 아님" })
 
   if (!nextPkmn || nextPkmn.hp <= 0)
     return res.status(403).json({ error: "교체 대상 포켓몬이 없거나 기절 상태" })
@@ -93,7 +94,7 @@ if (!isFainted && !isForceSwitch && order[0] !== mySlot)
 
   resetOnSwitch(prevPkmn)
   nextPkmn.seeded = false
-
+  nextPkmn.flinch = false  // [수정] 교체로 나온 포켓몬 풀죽음 리셋
 
   // 치유소원 회복
   const healWish = nextPkmn.healOnSwitchIn ?? false
@@ -101,7 +102,7 @@ if (!isFainted && !isForceSwitch && order[0] !== mySlot)
     nextPkmn.hp = nextPkmn.maxHp ?? nextPkmn.hp
     nextPkmn.healOnSwitchIn = false
   }
-  
+
   // 장판 발동 — active_idx를 newIdx로 미리 반영해야 올바른 포켓몬에 적용됨
   data[`${mySlot}_active_idx`] = newIdx
   const hazardLogs = applyEntryHazards(mySlot, entries, data)
@@ -113,19 +114,17 @@ if (!isFainted && !isForceSwitch && order[0] !== mySlot)
   ]
 
   // 기절 교체: 턴 소모 없음
- // 기절 교체 or 유턴 강제교체: 턴 소모 없음
-// 기절 교체만 턴 소모 없음
-if (isFainted) {
-  await writeLogs(db, roomId, logs)
-  await roomRef.update({
-    ...buildEntryUpdate(entries),
-    [`${mySlot}_active_idx`]: newIdx,
-    [`force_switch_${mySlot}`]: false,
-  })
-  return res.status(200).json({ ok: true })
-}
+  if (isFainted) {
+    await writeLogs(db, roomId, logs)
+    await roomRef.update({
+      ...buildEntryUpdate(entries),
+      [`${mySlot}_active_idx`]: newIdx,
+      [`force_switch_${mySlot}`]: false,
+    })
+    return res.status(200).json({ ok: true })
+  }
 
-// 유턴 강제교체 + 일반 교체: 아래 턴 소모 분기로 그냥 흘러가게 둠
+  // 유턴 강제교체 + 일반 교체: 아래 턴 소모 분기로 그냥 흘러가게 둠
 
   // 일반 교체: 턴 소모
   const newOrder     = order.slice(1)
