@@ -648,29 +648,49 @@ function onMoveClick(idx, moveInfo, data) {
 function enterTargetMode(idx, data, { targetsEnemy = true, targetsAlly = false, canSelf = false } = {}) {
   pendingMoveIdx = idx
   const hint = $("target-hint")
-  if (hint) hint.style.display = "block"
+  if (hint) {
+    hint.style.display = "block"
+    hint.innerText = (!targetsEnemy && (targetsAlly || canSelf))
+      ? "💊 대상을 클릭!"
+      : "⚔ 공격할 상대를 클릭!"
+  }
 
-  const clickableSlots = []
-  if (targetsEnemy) enemySlotsOf(mySlot).forEach(s => clickableSlots.push(s))
-  if (targetsAlly)  clickableSlots.push(allyOf(mySlot))
+  if (targetsEnemy) {
+    enemySlotsOf(mySlot).forEach(eSlot => {
+      const eActiveIdx = data[`${eSlot}_active_idx`] ?? 0
+      const ePkmn      = data[`${eSlot}_entry`]?.[eActiveIdx]
+      if (!ePkmn || ePkmn.hp <= 0) return
+      const prefix = slotToPrefix(eSlot)
+      const area   = $(`${prefix}-pokemon-area`)
+      if (!area) return
+      area.classList.add("target-selectable")
+      area.onclick = () => {
+        playSound(SFX_BTN)
+        const capturedIdx = pendingMoveIdx
+        exitTargetMode()
+        doUseMove(capturedIdx, [eSlot], data)
+      }
+    })
+  }
 
-  clickableSlots.forEach(eSlot => {
-    const eActiveIdx = data[`${eSlot}_active_idx`] ?? 0
-    const ePkmn      = data[`${eSlot}_entry`]?.[eActiveIdx]
-    if (!ePkmn || ePkmn.hp <= 0) return
-    const prefix = slotToPrefix(eSlot)
-    const area   = $(`${prefix}-pokemon-area`)
-    if (!area) return
-    area.classList.add("target-selectable")
-    area.onclick = () => {
-      playSound(SFX_BTN)
-      const capturedIdx = pendingMoveIdx
-      exitTargetMode()
-      doUseMove(capturedIdx, [eSlot], data)
+  if (targetsAlly) {
+    const allySlot   = allyOf(mySlot)
+    const allyActIdx = data[`${allySlot}_active_idx`] ?? 0
+    const allyPkmn   = data[`${allySlot}_entry`]?.[allyActIdx]
+    if (allyPkmn && allyPkmn.hp > 0) {
+      const allyArea = $("ally-pokemon-area")
+      if (allyArea) {
+        allyArea.classList.add("target-selectable")
+        allyArea.onclick = () => {
+          playSound(SFX_BTN)
+          const capturedIdx = pendingMoveIdx
+          exitTargetMode()
+          doUseMove(capturedIdx, [allySlot], data)
+        }
+      }
     }
-  })
+  }
 
-  // 알낳기/우유마시기: 자기 자신 영역도 클릭 가능 (targetSlots = [])
   if (canSelf) {
     const myArea = $("my-pokemon-area")
     if (myArea) {
@@ -679,24 +699,11 @@ function enterTargetMode(idx, data, { targetsEnemy = true, targetsAlly = false, 
         playSound(SFX_BTN)
         const capturedIdx = pendingMoveIdx
         exitTargetMode()
-        doUseMove(capturedIdx, [], data)  // 자신은 빈 배열로 전송
+        doUseMove(capturedIdx, [], data)
       }
     }
   }
 }
-
-function exitTargetMode() {
-  pendingMoveIdx = -1
-  const hint = $("target-hint")
-  if (hint) hint.style.display = "none"
-  ;["enemy1","enemy2","ally","my"].forEach(prefix => {
-    const area = $(`${prefix}-pokemon-area`)
-    if (!area) return
-    area.classList.remove("target-selectable")
-    area.onclick = null
-  })
-}
-
 async function doUseMove(moveIdx, targetSlots, data) {
   if (actionDone) return
   clearTurnTimer()
