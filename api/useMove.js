@@ -1078,10 +1078,11 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     const { damage, multiplier, critical, minRoll, minDice } = calcDamage(myPkmn, moveName, tPkmn)
     if (multiplier === 0) { logEntries.push(makeLog("normal", `${tPkmn.name}에게는 효과가 없다…`)); return { handled: true, damage: 0 } }
     dealDamage(damage, multiplier, critical, tSlot, tPkmn, minRoll, minDice)
-    if ((tPkmn.lightScreenTurns ?? 0) > 0) {
-      tPkmn.lightScreenTurns = 0
-      logEntries.push(makeLog("normal", `${tPkmn.name}${josa(tPkmn.name, "의")} 장막이 깨졌다!`))
-    }
+   const lsKey = `lightScreen_team${teamOf(tSlot)}`
+  if ((data[lsKey] ?? 0) > 0) {
+    data[lsKey] = 0
+    logEntries.push(makeLog("normal", `장막이 깨졌다!`))
+  }
     return { handled: true, damage }
   }
 
