@@ -631,7 +631,7 @@ function handleSpecialNonAttack(moveInfo, moveName, myPkmn, mySlot, tSlots, entr
       logEntries.push(makeLog("normal", `이미 ${moveName}이(가) 깔려있다!`))
     } else {
       data[fieldKey] = current + 1
-      logEntries.push(makeLog("normal", `${enemyTeam === "A" ? "A팀" : "B팀"}의 발밑에 ${moveName}을(를) 깔았다!`))
+      logEntries.push(makeLog("normal", `${enemyTeam === "A" ? "A팀" : "B팀"}의 발밑에 ${moveName}을 깔았다!`))
     }
     return { handled: true }
   }
@@ -1194,7 +1194,7 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     myPkmn.type = myTypes.filter(t => t !== "불")
     if (myPkmn.type.length === 0) myPkmn.type = ["노말"]
     myPkmn.burnOffTurns = 2
-    logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 불꽃을 다 불살랐다! 불꽃 타입이 사라졌다!`))
+    logEntries.push(makeLog("normal", `${myPkmn.name}${josa(myPkmn.name, "은는")} 불꽃 타입이 사라졌다!`))
     return { handled: true, damage }
   }
 
@@ -1523,7 +1523,7 @@ export default async function handler(req, res) {
     const targetSlot = rollState.targetSlot ?? null
     logEntries.push(makeLog("move_announce", `${myPkmn.name}의 구르기! (${rollTurn}번째)`))
     if (!targetSlot) {
-      logEntries.push(makeLog("normal", `구르기가 캔슬됐다!`))
+      logEntries.push(makeLog("normal", `구르기에 실패했다!`))
       myPkmn.rollState = { active: false, turn: 0 }
     } else {
       const eIdx  = data[`${targetSlot}_active_idx`] ?? 0
