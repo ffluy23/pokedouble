@@ -19,7 +19,7 @@ function playSound(url) {
 }
 
 async function callApi(endpoint, data) {
-  const res = await fetch(`${API}/${endpoint}`, {
+  const res = await fetch(`${API}/api/${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
