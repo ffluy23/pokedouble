@@ -994,7 +994,7 @@ function handleSpecialAttack(moveInfo, moveName, myPkmn, mySlot, tSlot, tPkmn, e
     if (multiplier === 0) { logEntries.push(makeLog("normal", `${tPkmn.name}에게는 효과가 없다…`)); return { handled: true, damage: 0 } }
     dealDamage(damage, multiplier, critical, tSlot, tPkmn, minRoll, minDice)
     if (tPkmn.hp > 0) {
-      tPkmn.throatChopped = 2
+      tPkmn.throatChopped = 8
       logEntries.push(makeLog("normal", `${tPkmn.name}${josa(tPkmn.name, "은는")} 목을 눌려 소리를 낼 수 없게 됐다!`))
     }
     return { handled: true, damage }
